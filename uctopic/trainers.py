@@ -33,6 +33,7 @@ from transformers.file_utils import (
     is_datasets_available,
     is_in_notebook,
     is_torch_tpu_available,
+    is_sagemaker_dp_enabled
 )
 from transformers.trainer_callback import (
     CallbackHandler,
@@ -46,7 +47,7 @@ from transformers.trainer_callback import (
 from transformers.trainer_pt_utils import (
     reissue_pt_warnings,
 )
-
+from transformers.trainer import *
 from transformers.utils import logging
 from transformers.data.data_collator import DataCollator, DataCollatorWithPadding, default_data_collator
 import torch
@@ -65,6 +66,12 @@ if is_torch_tpu_available():
 if is_apex_available():
     from apex import amp
 
+if is_sagemaker_dp_enabled():
+    import smdistributed.dataparallel.torch.distributed as dist
+    from smdistributed.dataparallel.torch.parallel.distributed import DistributedDataParallel as DDP
+else:
+    import torch.distributed as dist
+
 if version.parse(torch.__version__) >= version.parse("1.6"):
     _is_native_amp_available = True
     from torch.cuda.amp import autocast
@@ -75,16 +82,8 @@ if is_datasets_available():
 from transformers.trainer import _model_unwrap
 from transformers.optimization import Adafactor, AdamW, get_scheduler
 import copy
-# Set path to SentEval
-PATH_TO_SENTEVAL = './SentEval'
-PATH_TO_DATA = './SentEval/data'
 
-# Import SentEval
-sys.path.insert(0, PATH_TO_SENTEVAL)
-import senteval
 import numpy as np
-from datetime import datetime
-from filelock import FileLock
 
 logger = logging.get_logger(__name__)
 
@@ -95,53 +94,222 @@ class CLTrainer(Trainer):
         eval_dataset: Optional[Dataset] = None,
         ignore_keys: Optional[List[str]] = None,
         metric_key_prefix: str = "eval",
-        eval_senteval_transfer: bool = False,
     ) -> Dict[str, float]:
 
-        # SentEval prepare and batcher
-        def prepare(params, samples):
-            return
+        """
+        Run evaluation and returns metrics.
 
-        def batcher(params, batch):
-            sentences = [' '.join(s) for s in batch]
-            batch = self.tokenizer.batch_encode_plus(
-                sentences,
-                return_tensors='pt',
-                padding=True,
-            )
-            for k in batch:
-                batch[k] = batch[k].to(self.args.device)
-            with torch.no_grad():
-                outputs = self.model(**batch, output_hidden_states=True, return_dict=True, sent_emb=True)
-                pooler_output = outputs.pooler_output
-            return pooler_output.cpu()
+        The calling script will be responsible for providing a method to compute metrics, as they are task-dependent
+        (pass it to the init :obj:`compute_metrics` argument).
 
-        # Set params for SentEval (fastmode)
-        params = {'task_path': PATH_TO_DATA, 'usepytorch': True, 'kfold': 5}
-        params['classifier'] = {'nhid': 0, 'optim': 'rmsprop', 'batch_size': 128,
-                                            'tenacity': 3, 'epoch_size': 2}
+        You can also subclass and override this method to inject custom behavior.
 
-        se = senteval.engine.SE(params, batcher, prepare)
-        tasks = ['STSBenchmark', 'SICKRelatedness']
-        if eval_senteval_transfer or self.args.eval_transfer:
-            tasks = ['STSBenchmark', 'SICKRelatedness', 'MR', 'CR', 'SUBJ', 'MPQA', 'SST2', 'TREC', 'MRPC']
-        self.model.eval()
-        results = se.eval(tasks)
+        Args:
+            eval_dataset (:obj:`Dataset`, `optional`):
+                Pass a dataset if you wish to override :obj:`self.eval_dataset`. If it is an :obj:`datasets.Dataset`,
+                columns not accepted by the ``model.forward()`` method are automatically removed. It must implement the
+                :obj:`__len__` method.
+            ignore_keys (:obj:`Lst[str]`, `optional`):
+                A list of keys in the output of your model (if it is a dictionary) that should be ignored when
+                gathering predictions.
+            metric_key_prefix (:obj:`str`, `optional`, defaults to :obj:`"eval"`):
+                An optional prefix to be used as the metrics key prefix. For example the metrics "bleu" will be named
+                "eval_bleu" if the prefix is "eval" (default)
+
+        Returns:
+            A dictionary containing the evaluation loss and the potential metrics computed from the predictions. The
+            dictionary also contains the epoch number which comes from the training state.
+        """
+        if eval_dataset is not None and not isinstance(eval_dataset, collections.abc.Sized):
+            raise ValueError("eval_dataset must implement __len__")
+
+        eval_dataloader = self.get_eval_dataloader(eval_dataset)
+        start_time = time.time()
+
+        output = self.prediction_loop(
+            eval_dataloader,
+            description="Evaluation",
+            # No point gathering the predictions if there are no metrics, otherwise we defer to
+            # self.args.prediction_loss_only
+            prediction_loss_only=True if self.compute_metrics is None else None,
+            ignore_keys=ignore_keys,
+            metric_key_prefix=metric_key_prefix,
+        )
+
+        n_samples = len(eval_dataset if eval_dataset is not None else self.eval_dataset)
+        output.update(speed_metrics(metric_key_prefix, start_time, n_samples))
+        self.log(output)
+
+        if self.args.tpu_metrics_debug or self.args.debug:
+            # tpu-comment: Logging debug metrics for PyTorch/XLA (compile, execute times, ops, etc.)
+            xm.master_print(met.metrics_report())
+
+        self.control = self.callback_handler.on_evaluate(self.args, self.state, self.control, output)
+        return output
+
+    def prediction_loop(
+        self,
+        dataloader: DataLoader,
+        description: str,
+        prediction_loss_only: Optional[bool] = None,
+        ignore_keys: Optional[List[str]] = None,
+        metric_key_prefix: str = "eval",
+    ):
+        """
+        Prediction/evaluation loop, shared by :obj:`Trainer.evaluate()` and :obj:`Trainer.predict()`.
+
+        Works both with or without labels.
+        """
+        if not isinstance(dataloader.dataset, collections.abc.Sized):
+            raise ValueError("dataset must implement __len__")
+        prediction_loss_only = (
+            prediction_loss_only if prediction_loss_only is not None else self.args.prediction_loss_only
+        )
+
+        if self.args.deepspeed and not self.args.do_train:
+            # In the future we probably can run deepspeed for inference too, but this will require
+            # some thinking about how to best run it - since while it works DeepSpeed wasn't
+            # designed for inference
+
+            # since we have to postpone model.to() till training for DeepSpeed, if there was no
+            # training, we must put the model on the right device
+            self.model = self.model.to(self.args.device)
+
+        model = self.model
+
+        # multi-gpu eval
+        if self.args.n_gpu > 1:
+            model = torch.nn.DataParallel(model)
+        # Note: in torch.distributed mode, there's no point in wrapping the model
+        # inside a DistributedDataParallel as we'll be under `no_grad` anyways.
+
+        batch_size = dataloader.batch_size
+        num_examples = self.num_examples(dataloader)
+        self.logger.info("***** Running %s *****", description)
+        self.logger.info("  Num examples = %d", num_examples)
+        self.logger.info("  Batch size = %d", batch_size)
+        losses_host: torch.Tensor = None
+        preds_host: Union[torch.Tensor, List[torch.Tensor]] = None
+        labels_host: Union[torch.Tensor, List[torch.Tensor]] = None
+
+        world_size = 1
+        if is_torch_tpu_available():
+            world_size = xm.xrt_world_size()
+        elif self.args.local_rank != -1:
+            world_size = dist.get_world_size()
+        world_size = max(1, world_size)
+
+        eval_losses_gatherer = DistributedTensorGatherer(world_size, num_examples, make_multiple_of=batch_size)
+        if not prediction_loss_only:
+            preds_gatherer = DistributedTensorGatherer(world_size, num_examples)
+            labels_gatherer = DistributedTensorGatherer(world_size, num_examples)
+
+        model.eval()
+
+        if is_torch_tpu_available():
+            dataloader = pl.ParallelLoader(dataloader, [self.args.device]).per_device_loader(self.args.device)
+
+        if self.args.past_index >= 0:
+            self._past = None
+
+        self.callback_handler.eval_dataloader = dataloader
+
         
-        stsb_spearman = results['STSBenchmark']['dev']['spearman'][0]
-        sickr_spearman = results['SICKRelatedness']['dev']['spearman'][0]
+        metrics = dict(
+            loss = 0,
+            correct_num = 0,
+            total_num = 0
+        )
+        it = 1e-5
+        for step, inputs in enumerate(dataloader):
+            loss, outputs = self.prediction_step(model, inputs, prediction_loss_only, ignore_keys=ignore_keys)
 
-        metrics = {"eval_stsb_spearman": stsb_spearman, "eval_sickr_spearman": sickr_spearman, "eval_avg_sts": (stsb_spearman + sickr_spearman) / 2} 
-        if eval_senteval_transfer or self.args.eval_transfer:
-            avg_transfer = 0
-            for task in ['MR', 'CR', 'SUBJ', 'MPQA', 'SST2', 'TREC', 'MRPC']:
-                avg_transfer += results[task]['devacc']
-                metrics['eval_{}'.format(task)] = results[task]['devacc']
-            avg_transfer /= 7
-            metrics['eval_avg_transfer'] = avg_transfer
+            it+=1
+            metrics["loss"] += loss
+            metrics['correct_num'] += outputs['correct_num']
+            metrics['total_num'] += outputs['total_num']
+            
+            self.control = self.callback_handler.on_prediction_step(self.args, self.state, self.control)
 
-        self.log(metrics)
+        if self.args.past_index and hasattr(self, "_past"):
+            # Clean the state at the end of the evaluation loop
+            delattr(self, "_past")
+
+
+        metrics["accuracy"] = metrics["correct_num"] / metrics["total_num"]
+        metrics["loss"] = metrics["loss"] / it
+
+        self.logger.info(f'Loss: {metrics["loss"]}')
+        self.logger.info(f'Accuracy: {metrics["accuracy"]}')
         return metrics
+
+    def prediction_step(
+        self,
+        model: nn.Module,
+        inputs: Dict[str, Union[torch.Tensor, Any]],
+        prediction_loss_only: bool,
+        ignore_keys: Optional[List[str]] = None,
+    ):
+        """
+        Perform an evaluation step on :obj:`model` using obj:`inputs`.
+
+        Subclass and override to inject custom behavior.
+
+        Args:
+            model (:obj:`nn.Module`):
+                The model to evaluate.
+            inputs (:obj:`Dict[str, Union[torch.Tensor, Any]]`):
+                The inputs and targets of the model.
+
+                The dictionary will be unpacked before being fed to the model. Most models expect the targets under the
+                argument :obj:`labels`. Check your model's documentation for all accepted arguments.
+            prediction_loss_only (:obj:`bool`):
+                Whether or not to return the loss only.
+            ignore_keys (:obj:`Lst[str]`, `optional`):
+                A list of keys in the output of your model (if it is a dictionary) that should be ignored when
+                gathering predictions.
+
+        Return:
+            Tuple[Optional[float], Optional[torch.Tensor], Optional[torch.Tensor]]: A tuple with the loss, logits and
+            labels (each being optional).
+        """
+        
+        inputs = self._prepare_inputs(inputs)
+        
+        with torch.no_grad():
+            
+            loss, outputs = self.compute_loss(model, inputs, return_outputs=True)
+            loss = loss.mean().detach().cpu().item()
+            outputs["loss"] = outputs["loss"].mean().detach().cpu().item()
+        return loss, outputs
+
+    def compute_loss(self, model, inputs, return_outputs=False):
+
+        outputs = model(**inputs)
+
+        if return_outputs:
+            return outputs["loss"], outputs
+        else:
+            return outputs["loss"]
+
+    def log(self, logs: Dict[str, float]) -> None:
+        """
+        Log :obj:`logs` on the various objects watching training.
+
+        Subclass and override this method to inject custom behavior.
+
+        Args:
+            logs (:obj:`Dict[str, float]`):
+                The values to log.
+        """
+        if self.state.epoch is not None:
+            logs["epoch"] = round(self.state.epoch, 2)
+
+        self.control = self.callback_handler.on_log(self.args, self.state, self.control, logs)
+        output = {**logs, **{"step": self.state.global_step}}
+        self.state.log_history.append(output)
+
+        self.logger.info(output)
         
     def _save_checkpoint(self, model, trial, metrics=None):
         """
@@ -156,8 +324,6 @@ class CLTrainer(Trainer):
         # Determine the new best metric / best model checkpoint
         if metrics is not None and self.args.metric_for_best_model is not None:
             metric_to_check = self.args.metric_for_best_model
-            if not metric_to_check.startswith("eval_"):
-                metric_to_check = f"eval_{metric_to_check}"
             metric_value = metrics[metric_to_check]
 
             operator = np.greater if self.args.greater_is_better else np.less
@@ -302,15 +468,15 @@ class CLTrainer(Trainer):
             num_train_epochs = 1
             num_update_steps_per_epoch = max_steps
 
-        if self.args.deepspeed:
-            model, optimizer, lr_scheduler = init_deepspeed(self, num_training_steps=max_steps)
-            self.model = model.module
-            self.model_wrapped = model  # will get further wrapped in DDP
-            self.deepspeed = model  # DeepSpeedEngine object
-            self.optimizer = optimizer
-            self.lr_scheduler = lr_scheduler
-        else:
-            self.create_optimizer_and_scheduler(num_training_steps=max_steps)
+        # if self.args.deepspeed:
+        #     model, optimizer, lr_scheduler = init_deepspeed(self, num_training_steps=max_steps)
+        #     self.model = model.module
+        #     self.model_wrapped = model  # will get further wrapped in DDP
+        #     self.deepspeed = model  # DeepSpeedEngine object
+        #     self.optimizer = optimizer
+        #     self.lr_scheduler = lr_scheduler
+        # else:
+        self.create_optimizer_and_scheduler(num_training_steps=max_steps)
 
         self.state = TrainerState()
         self.state.is_hyper_param_search = trial is not None
@@ -406,8 +572,7 @@ class CLTrainer(Trainer):
         self.callback_handler.optimizer = self.optimizer
         self.callback_handler.lr_scheduler = self.lr_scheduler
         self.callback_handler.train_dataloader = train_dataloader
-        self.state.trial_name = self.hp_name(trial) if self.hp_name is not None else None
-        self.state.trial_params = hp_params(trial) if trial is not None else None
+
         # This should be the same if the state has been saved but in case the training arguments changed, it's safer
         # to set this after the load.
         self.state.max_steps = max_steps

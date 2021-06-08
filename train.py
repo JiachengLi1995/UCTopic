@@ -8,7 +8,13 @@ import torch
 import collections
 import random
 import utils
-from datasets import Dataset
+from datasets import Dataset, DatasetDict
+import json
+from multiprocessing import Pool
+from pathlib import Path
+from tqdm import tqdm
+from itertools import combinations
+import copy
 
 import transformers
 from transformers import (
@@ -34,8 +40,9 @@ from transformers.tokenization_utils_base import BatchEncoding, PaddingStrategy,
 from transformers.trainer_utils import is_main_process
 from transformers.data.data_collator import DataCollatorForLanguageModeling
 from transformers.file_utils import cached_property, torch_required, is_torch_available, is_torch_tpu_available
-from uctopic.models import RobertaForCL, BertForCL
+from uctopic.models import UCTopicModel
 from uctopic.trainers import CLTrainer
+from collator import OurDataCollatorWithPadding
 
 logger = logging.getLogger(__name__)
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_MASKED_LM_MAPPING.keys())
@@ -273,38 +280,18 @@ def main():
     # Set seed before initializing model.
     set_seed(training_args.seed)
 
-    # Get the datasets: you can either provide your own CSV/JSON/TXT training and evaluation files (see below)
-    # or just provide the name of one of the public datasets available on the hub at https://huggingface.co/datasets/
-    # (the dataset will be downloaded automatically from the datasets Hub
-    #
-    # For CSV/JSON files, this script will use the column called 'text' or the first column. You can easily tweak this
-    # behavior (see below)
-    #
-    # In distributed training, the load_dataset function guarantee that only one local process can concurrently
-    # download the dataset.
-    
-    datasets = utils.load_preprocess_dataset(cores=data_args.preprocessing_num_workers, cache_dir="./data/", data_file=data_args.train_file)
-
-    # See more about loading any type of standard or custom dataset (from files, python dict, pandas DataFrame, etc) at
-    # https://huggingface.co/docs/datasets/loading_datasets.html.
-
-    # Load pretrained model and tokenizer
-    #
-    # Distributed training:
-    # The .from_pretrained methods guarantee that only one local process can concurrently
-    # download model & vocab.
-    config_kwargs = {
-        "cache_dir": model_args.cache_dir,
-        "revision": model_args.model_revision,
-        "use_auth_token": True if model_args.use_auth_token else None,
-    }
-    if model_args.config_name:
-        config = AutoConfig.from_pretrained(model_args.config_name, **config_kwargs)
-    elif model_args.model_name_or_path:
-        config = AutoConfig.from_pretrained(model_args.model_name_or_path, **config_kwargs)
-    else:
-        config = CONFIG_MAPPING[model_args.model_type]()
-        logger.warning("You are instantiating a new config instance from scratch.")
+    # config_kwargs = {
+    #     "cache_dir": model_args.cache_dir,
+    #     "revision": model_args.model_revision,
+    #     "use_auth_token": True if model_args.use_auth_token else None,
+    # }
+    # if model_args.config_name:
+    #     config = AutoConfig.from_pretrained(model_args.config_name, **config_kwargs)
+    # elif model_args.model_name_or_path:
+    #     config = AutoConfig.from_pretrained(model_args.model_name_or_path, **config_kwargs)
+    # else:
+    #     config = CONFIG_MAPPING[model_args.model_type]()
+    #     logger.warning("You are instantiating a new config instance from scratch.")
 
     tokenizer_kwargs = {
         "cache_dir": model_args.cache_dir,
@@ -312,6 +299,7 @@ def main():
         "revision": model_args.model_revision,
         "use_auth_token": True if model_args.use_auth_token else None,
     }
+
     if model_args.tokenizer_name:
         tokenizer = AutoTokenizer.from_pretrained(model_args.tokenizer_name, **tokenizer_kwargs)
     elif model_args.model_name_or_path:
@@ -321,194 +309,88 @@ def main():
             "You are instantiating a new tokenizer from scratch. This is not supported by this script."
             "You can do it from another script, save it, and load it from here, using --tokenizer_name."
         )
+    
 
-    if model_args.model_name_or_path:
-        if 'roberta' in model_args.model_name_or_path:
-            model = RobertaForCL.from_pretrained(
-                model_args.model_name_or_path,
-                from_tf=bool(".ckpt" in model_args.model_name_or_path),
-                config=config,
-                cache_dir=model_args.cache_dir,
-                revision=model_args.model_revision,
-                use_auth_token=True if model_args.use_auth_token else None,
-                model_args=model_args                  
-            )
-        elif 'bert' in model_args.model_name_or_path:
-            model = BertForCL.from_pretrained(
-                model_args.model_name_or_path,
-                from_tf=bool(".ckpt" in model_args.model_name_or_path),
-                config=config,
-                cache_dir=model_args.cache_dir,
-                revision=model_args.model_revision,
-                use_auth_token=True if model_args.use_auth_token else None,
-                model_args=model_args
-            )
-            if model_args.do_mlm:
-                pretrained_model = BertForPreTraining.from_pretrained(model_args.model_name_or_path)
-                model.lm_head.load_state_dict(pretrained_model.cls.predictions.state_dict())
-        else:
-            raise NotImplementedError
-    else:
-        raise NotImplementedError
-        logger.info("Training new model from scratch")
-        model = AutoModelForMaskedLM.from_config(config)
+    # preprocess corpus
+    def _par_tokenize_doc(doc):
+        sentence = doc['text']
+        entities = doc['selected_entities']
 
-    model.resize_token_embeddings(len(tokenizer))
+        entity_spans = [(entity[2], entity[3]) for entity in entities]
+        entity_ids = [entity[1] for entity in entities]
+        tokenized_sent = tokenizer(sentence,
+                                   entity_spans=entity_spans,
+                                   add_prefix_space=True,
+                                   max_length=data_args.max_seq_length,
+                                   truncation=True,
+                                   padding="max_length" if data_args.pad_to_max_length else False)
 
-    # Prepare features
-    column_names = datasets["train"].column_names
-    sent2_cname = None
-    if len(column_names) == 2:
-        # Pair datasets
-        sent0_cname = column_names[0]
-        sent1_cname = column_names[1]
-    elif len(column_names) == 3:
-        # Pair datasets with hard negatives
-        sent0_cname = column_names[0]
-        sent1_cname = column_names[1]
-        sent2_cname = column_names[2]
-    elif len(column_names) == 1:
-        # Unsupervised datasets
-        sent0_cname = column_names[0]
-        sent1_cname = column_names[0]
-    else:
-        raise NotImplementedError
+        return tokenized_sent, entity_ids
 
-    def prepare_features(examples):
-        # padding = longest (default)
-        #   If no sentence in the batch exceed the max length, then use
-        #   the max sentence length in the batch, otherwise use the 
-        #   max sentence length in the argument and truncate those that
-        #   exceed the max length.
-        # padding = max_length (when pad_to_max_length, for pressure test)
-        #   All sentences are padded/truncated to data_args.max_seq_length.
-        total = len(examples[sent0_cname])
-
-        # Avoid "None" fields 
-        for idx in range(total):
-            if examples[sent0_cname][idx] is None:
-                examples[sent0_cname][idx] = " "
-            if examples[sent1_cname][idx] is None:
-                examples[sent1_cname][idx] = " "
+    def _par_sample_pairs(entity_list):
         
-        sentences = examples[sent0_cname] + examples[sent1_cname]
+        return list(combinations(entity_list, 2))
 
-        # If hard negative exists
-        if sent2_cname is not None:
-            for idx in range(total):
-                if examples[sent2_cname][idx] is None:
-                    examples[sent2_cname][idx] = " "
-            sentences += examples[sent2_cname]
 
-        sent_features = tokenizer(
-            sentences,
-            max_length=data_args.max_seq_length,
-            truncation=True,
-            padding="max_length" if data_args.pad_to_max_length else False,
-        )
+    path_corpus = Path(data_args.train_file)
+    dir_corpus = path_corpus.parent
+    dir_preprocess = dir_corpus / 'preprocess'
+    dir_preprocess.mkdir(exist_ok=True)
 
-        features = {}
-        if sent2_cname is not None:
-            for key in sent_features:
-                features[key] = [[sent_features[key][i], sent_features[key][i+total], sent_features[key][i+total*2]] for i in range(total)]
-        else:
-            for key in sent_features:
-                features[key] = [[sent_features[key][i], sent_features[key][i+total]] for i in range(total)]
-            
-        return features
+    path_tokenized_corpus = dir_preprocess / f'tokenized_{path_corpus.name}'
+    path_entity_pairs = dir_preprocess / f'entity_pairs_{path_corpus.name}'
 
-    if training_args.do_train:
-        train_dataset = datasets["train"].map(
-            prepare_features,
-            batched=True,
-            num_proc=data_args.preprocessing_num_workers,
-            remove_columns=column_names,
-            load_from_cache_file=not data_args.overwrite_cache,
-        )
 
-    # Data collator
-    @dataclass
-    class OurDataCollatorWithPadding:
+    if utils.IO.is_valid_file(path_tokenized_corpus) and utils.IO.is_valid_file(path_entity_pairs):
+        print(f'[Preprocessor] Use cache: {path_tokenized_corpus} and {path_entity_pairs}')
+    else:
+        docs = utils.JsonLine.load(path_corpus)
+        pool = Pool(processes=data_args.preprocessing_num_workers)
+        pool_func = pool.imap(func=_par_tokenize_doc, iterable=docs)
+        doc_tuples = list(tqdm(pool_func, total=len(docs), ncols=100, desc=f'[Tokenize] {path_corpus}'))
+        tokenized_corpus = [tokenized_sent for tokenized_sent, entity_ids in doc_tuples]
+        doc_entity_list = [entity_ids for tokenized_sent, entity_ids in doc_tuples]
+        pool.close()
+        pool.join()
 
-        tokenizer: PreTrainedTokenizerBase
-        padding: Union[bool, str, PaddingStrategy] = True
-        max_length: Optional[int] = None
-        pad_to_multiple_of: Optional[int] = None
-        mlm: bool = True
-        mlm_probability: float = data_args.mlm_probability
+        entity_position_dict = collections.defaultdict(list)
+        for sent_idx, sent_entity_list in tqdm(enumerate(doc_entity_list), ncols=100, desc='Extract entity positions'):
+            for entity_idx, entity in enumerate(sent_entity_list):
+                entity_position_dict[entity].append((sent_idx, entity_idx))
 
-        def __call__(self, features: List[Dict[str, Union[List[int], List[List[int]], torch.Tensor]]]) -> Dict[str, torch.Tensor]:
-            special_keys = ['input_ids', 'attention_mask', 'token_type_ids', 'mlm_input_ids', 'mlm_labels']
-            bs = len(features)
-            if bs > 0:
-                num_sent = len(features[0]['input_ids'])
-            else:
-                return
-            flat_features = []
-            for feature in features:
-                for i in range(num_sent):
-                    flat_features.append({k: feature[k][i] if k in special_keys else feature[k] for k in feature})
+        pool = Pool(processes=data_args.preprocessing_num_workers)
+        pool_func = pool.imap(func=_par_sample_pairs, iterable=entity_position_dict.values())
+        pair_tuples = list(tqdm(pool_func, total=len(entity_position_dict), ncols=100, desc=f'Pairing....'))
+        entity_pairs = []
+        for sent_entity_pairs in pair_tuples:
+            entity_pairs += sent_entity_pairs
+        pool.close()
+        pool.join()
+        print(f'Toal number of pairs: {len(entity_pairs)}')
+        random.shuffle(entity_pairs)
 
-            batch = self.tokenizer.pad(
-                flat_features,
-                padding=self.padding,
-                max_length=self.max_length,
-                pad_to_multiple_of=self.pad_to_multiple_of,
-                return_tensors="pt",
-            )
-            if model_args.do_mlm:
-                batch["mlm_input_ids"], batch["mlm_labels"] = self.mask_tokens(batch["input_ids"])
+        utils.JsonLine.dump(tokenized_corpus, path_tokenized_corpus)
+        utils.JsonLine.dump(entity_pairs, path_entity_pairs)
 
-            batch = {k: batch[k].view(bs, num_sent, -1) if k in special_keys else batch[k].view(bs, num_sent, -1)[:, 0] for k in batch}
+    tokenized_corpus = utils.JsonLine.load(path_tokenized_corpus)
+    entity_pairs = utils.JsonLine.load(path_entity_pairs)
 
-            if "label" in batch:
-                batch["labels"] = batch["label"]
-                del batch["label"]
-            if "label_ids" in batch:
-                batch["labels"] = batch["label_ids"]
-                del batch["label_ids"]
+    
+    model = UCTopicModel(model_args)        
 
-            return batch
-        
-        def mask_tokens(
-            self, inputs: torch.Tensor, special_tokens_mask: Optional[torch.Tensor] = None
-        ) -> Tuple[torch.Tensor, torch.Tensor]:
-            """
-            Prepare masked tokens inputs/labels for masked language modeling: 80% MASK, 10% random, 10% original.
-            """
-            labels = inputs.clone()
-            # We sample a few tokens in each sequence for MLM training (with probability `self.mlm_probability`)
-            probability_matrix = torch.full(labels.shape, self.mlm_probability)
-            if special_tokens_mask is None:
-                special_tokens_mask = [
-                    self.tokenizer.get_special_tokens_mask(val, already_has_special_tokens=True) for val in labels.tolist()
-                ]
-                special_tokens_mask = torch.tensor(special_tokens_mask, dtype=torch.bool)
-            else:
-                special_tokens_mask = special_tokens_mask.bool()
+    train_dict = {'entity_pairs': entity_pairs[:-100000]}
+    dev_dict = {'entity_pairs': entity_pairs[-100000:]}
 
-            probability_matrix.masked_fill_(special_tokens_mask, value=0.0)
-            masked_indices = torch.bernoulli(probability_matrix).bool()
-            labels[~masked_indices] = -100  # We only compute loss on masked tokens
-
-            # 80% of the time, we replace masked input tokens with tokenizer.mask_token ([MASK])
-            indices_replaced = torch.bernoulli(torch.full(labels.shape, 0.8)).bool() & masked_indices
-            inputs[indices_replaced] = self.tokenizer.convert_tokens_to_ids(self.tokenizer.mask_token)
-
-            # 10% of the time, we replace masked input tokens with random word
-            indices_random = torch.bernoulli(torch.full(labels.shape, 0.5)).bool() & masked_indices & ~indices_replaced
-            random_words = torch.randint(len(self.tokenizer), labels.shape, dtype=torch.long)
-            inputs[indices_random] = random_words[indices_random]
-
-            # The rest of the time (10% of the time) we keep the masked input tokens unchanged
-            return inputs, labels
-
-    data_collator = default_data_collator if data_args.pad_to_max_length else OurDataCollatorWithPadding(tokenizer)
+    train_dataset = Dataset.from_dict(train_dict)
+    dev_dataset = Dataset.from_dict(dev_dict)
+    
+    data_collator = OurDataCollatorWithPadding(tokenizer, tokenized_corpus, mlm_probability=data_args.mlm_probability)
 
     trainer = CLTrainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset if training_args.do_train else None,
+        eval_dataset=dev_dataset if training_args.do_eval else None,
         tokenizer=tokenizer,
         data_collator=data_collator,
     )
