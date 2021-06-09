@@ -1,12 +1,17 @@
 import logging
 import math
 import os
+os.environ['TRANSFORMERS_CACHE'] = '/data1/jiacheng/.cache/huggingface/'
+os.environ['HF_DATASETS_CACHE'] = os.environ['TRANSFORMERS_CACHE'] + 'datasets/'
+os.environ['HF_METRICS_CACHE'] = os.environ['TRANSFORMERS_CACHE'] + 'metrics/'
 import sys
 from dataclasses import dataclass, field
 from typing import Optional, Union, List, Dict, Tuple
 import torch
 import collections
 import random
+
+from transformers.models.auto.tokenization_auto import tokenizer_class_from_name
 import utils
 from datasets import Dataset, DatasetDict
 import json
@@ -106,7 +111,7 @@ class ModelArguments:
         }
     )
     mlm_weight: float = field(
-        default=0.1,
+        default=0.5,
         metadata={
             "help": "Weight for MLM auxiliary objective (only effective if --do_mlm)."
         }
@@ -178,72 +183,29 @@ class DataTrainingArguments:
                 extension = self.train_file.split(".")[-1]
                 assert extension in ["csv", "json", "txt"], "`train_file` should be a csv, a json or a txt file."
 
+tokenizer_glb = ''
+def _par_tokenize_doc(doc):
+    sentence = doc['text']
+    entities = doc['selected_entities']
 
-@dataclass
-class OurTrainingArguments(TrainingArguments):
-    # Evaluation
-    ## By default, we evaluate STS (dev) during training (for selecting best checkpoints) and evaluate 
-    ## both STS and transfer tasks (dev) at the end of training. Using --eval_transfer will allow evaluating
-    ## both STS and transfer tasks (dev) during training.
-    eval_transfer: bool = field(
-        default=False,
-        metadata={"help": "Evaluate transfer task dev sets (in validation)."}
-    )
+    entity_spans = [(entity[2], entity[3]) for entity in entities]
+    entity_ids = [entity[1] for entity in entities]
+    tokenized_sent = tokenizer_glb(sentence,
+                                   entity_spans=entity_spans,
+                                   add_prefix_space=True)
 
-    @cached_property
-    @torch_required
-    def _setup_devices(self) -> "torch.device":
-        logger.info("PyTorch: setting up devices")
-        if self.no_cuda:
-            device = torch.device("cpu")
-            self._n_gpu = 0
-        elif is_torch_tpu_available():
-            device = xm.xla_device()
-            self._n_gpu = 0
-        elif self.local_rank == -1:
-            # if n_gpu is > 1 we'll use nn.DataParallel.
-            # If you only want to use a specific subset of GPUs use `CUDA_VISIBLE_DEVICES=0`
-            # Explicitly set CUDA to the first (index 0) CUDA device, otherwise `set_device` will
-            # trigger an error that a device index is missing. Index 0 takes into account the
-            # GPUs available in the environment, so `CUDA_VISIBLE_DEVICES=1,2` with `cuda:0`
-            # will use the first GPU in that env, i.e. GPU#1
-            device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-            # Sometimes the line in the postinit has not been run before we end up here, so just checking we're not at
-            # the default value.
-            self._n_gpu = torch.cuda.device_count()
-        else:
-            # Here, we'll use torch.distributed.
-            # Initializes the distributed backend which will take care of synchronizing nodes/GPUs
-            #
-            # deepspeed performs its own DDP internally, and requires the program to be started with:
-            # deepspeed  ./program.py
-            # rather than:
-            # python -m torch.distributed.launch --nproc_per_node=2 ./program.py
-            if self.deepspeed:
-                from .integrations import is_deepspeed_available
+    return dict(tokenized_sent), entity_ids
 
-                if not is_deepspeed_available():
-                    raise ImportError("--deepspeed requires deepspeed: `pip install deepspeed`.")
-                import deepspeed
-
-                deepspeed.init_distributed()
-            else:
-                torch.distributed.init_process_group(backend="nccl")
-            device = torch.device("cuda", self.local_rank)
-            self._n_gpu = 1
-
-        if device.type == "cuda":
-            torch.cuda.set_device(device)
-
-        return device
-
+def _par_sample_pairs(entity_list):
+    
+    return list(combinations(entity_list, 2))
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
     # We now keep distinct sets of args, for a cleaner separation of concerns.
 
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, OurTrainingArguments))
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
     
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
@@ -280,18 +242,18 @@ def main():
     # Set seed before initializing model.
     set_seed(training_args.seed)
 
-    # config_kwargs = {
-    #     "cache_dir": model_args.cache_dir,
-    #     "revision": model_args.model_revision,
-    #     "use_auth_token": True if model_args.use_auth_token else None,
-    # }
-    # if model_args.config_name:
-    #     config = AutoConfig.from_pretrained(model_args.config_name, **config_kwargs)
-    # elif model_args.model_name_or_path:
-    #     config = AutoConfig.from_pretrained(model_args.model_name_or_path, **config_kwargs)
-    # else:
-    #     config = CONFIG_MAPPING[model_args.model_type]()
-    #     logger.warning("You are instantiating a new config instance from scratch.")
+    config_kwargs = {
+        "cache_dir": model_args.cache_dir,
+        "revision": model_args.model_revision,
+        "use_auth_token": True if model_args.use_auth_token else None,
+    }
+    if model_args.config_name:
+        config = AutoConfig.from_pretrained(model_args.config_name, **config_kwargs)
+    elif model_args.model_name_or_path:
+        config = AutoConfig.from_pretrained(model_args.model_name_or_path, **config_kwargs)
+    else:
+        config = CONFIG_MAPPING[model_args.model_type]()
+        logger.warning("You are instantiating a new config instance from scratch.")
 
     tokenizer_kwargs = {
         "cache_dir": model_args.cache_dir,
@@ -309,29 +271,10 @@ def main():
             "You are instantiating a new tokenizer from scratch. This is not supported by this script."
             "You can do it from another script, save it, and load it from here, using --tokenizer_name."
         )
-    
+    global tokenizer_glb
+    tokenizer_glb = tokenizer
 
     # preprocess corpus
-    def _par_tokenize_doc(doc):
-        sentence = doc['text']
-        entities = doc['selected_entities']
-
-        entity_spans = [(entity[2], entity[3]) for entity in entities]
-        entity_ids = [entity[1] for entity in entities]
-        tokenized_sent = tokenizer(sentence,
-                                   entity_spans=entity_spans,
-                                   add_prefix_space=True,
-                                   max_length=data_args.max_seq_length,
-                                   truncation=True,
-                                   padding="max_length" if data_args.pad_to_max_length else False)
-
-        return tokenized_sent, entity_ids
-
-    def _par_sample_pairs(entity_list):
-        
-        return list(combinations(entity_list, 2))
-
-
     path_corpus = Path(data_args.train_file)
     dir_corpus = path_corpus.parent
     dir_preprocess = dir_corpus / 'preprocess'
@@ -374,10 +317,10 @@ def main():
 
     tokenized_corpus = utils.JsonLine.load(path_tokenized_corpus)
     entity_pairs = utils.JsonLine.load(path_entity_pairs)
-
+    print(f'Successfully load {len(tokenized_corpus)} sentences, and {len(entity_pairs)} entity_pairs.')
     
-    model = UCTopicModel(model_args)        
-
+    model = UCTopicModel(model_args, config)        
+    
     train_dict = {'entity_pairs': entity_pairs[:-100000]}
     dev_dict = {'entity_pairs': entity_pairs[-100000:]}
 

@@ -79,7 +79,7 @@ if version.parse(torch.__version__) >= version.parse("1.6"):
 if is_datasets_available():
     import datasets
 
-from transformers.trainer import _model_unwrap
+#from transformers.trainer import _model_unwrap
 from transformers.optimization import Adafactor, AdamW, get_scheduler
 import copy
 
@@ -185,9 +185,9 @@ class CLTrainer(Trainer):
 
         batch_size = dataloader.batch_size
         num_examples = self.num_examples(dataloader)
-        self.logger.info("***** Running %s *****", description)
-        self.logger.info("  Num examples = %d", num_examples)
-        self.logger.info("  Batch size = %d", batch_size)
+        logger.info("***** Running %s *****", description)
+        logger.info("  Num examples = %d", num_examples)
+        logger.info("  Batch size = %d", batch_size)
         losses_host: torch.Tensor = None
         preds_host: Union[torch.Tensor, List[torch.Tensor]] = None
         labels_host: Union[torch.Tensor, List[torch.Tensor]] = None
@@ -239,8 +239,8 @@ class CLTrainer(Trainer):
         metrics["accuracy"] = metrics["correct_num"] / metrics["total_num"]
         metrics["loss"] = metrics["loss"] / it
 
-        self.logger.info(f'Loss: {metrics["loss"]}')
-        self.logger.info(f'Accuracy: {metrics["accuracy"]}')
+        logger.info(f'Loss: {metrics["loss"]}')
+        logger.info(f'Accuracy: {metrics["accuracy"]}')
         return metrics
 
     def prediction_step(
@@ -309,7 +309,7 @@ class CLTrainer(Trainer):
         output = {**logs, **{"step": self.state.global_step}}
         self.state.log_history.append(output)
 
-        self.logger.info(output)
+        logger.info(output)
         
     def _save_checkpoint(self, model, trial, metrics=None):
         """
@@ -319,7 +319,7 @@ class CLTrainer(Trainer):
 
         # In all cases, including ddp/dp/deepspeed, self.model is always a reference to the model we
         # want to save.
-        assert _model_unwrap(model) is self.model, "internal model should be a reference to self.model"
+        # assert _model_unwrap(model) is self.model, "internal model should be a reference to self.model"
 
         # Determine the new best metric / best model checkpoint
         if metrics is not None and self.args.metric_for_best_model is not None:
@@ -342,7 +342,7 @@ class CLTrainer(Trainer):
                     self.deepspeed.save_checkpoint(output_dir)
 
                 # Save optimizer and scheduler
-                if self.sharded_dpp:
+                if self.sharded_ddp:
                     self.optimizer.consolidate_state_dict()
 
                 if is_torch_tpu_available():
@@ -384,7 +384,7 @@ class CLTrainer(Trainer):
                 self.deepspeed.save_checkpoint(output_dir)
 
             # Save optimizer and scheduler
-            if self.sharded_dpp:
+            if self.sharded_ddp:
                 self.optimizer.consolidate_state_dict()
 
             if is_torch_tpu_available():
@@ -495,7 +495,7 @@ class CLTrainer(Trainer):
             model = torch.nn.DataParallel(model)
 
         # Distributed training (should be after apex fp16 initialization)
-        if self.sharded_dpp:
+        if self.sharded_ddp:
             model = ShardedDDP(model, self.optimizer)
         elif self.args.local_rank != -1:
             model = torch.nn.parallel.DistributedDataParallel(

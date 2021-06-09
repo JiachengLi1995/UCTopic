@@ -86,7 +86,7 @@ class OurDataCollatorWithPadding:
 
         return entity_feature1, entity_feature2
 
-    def flatten_features(entity_feature1, entity_feature2):
+    def flatten_features(self, entity_feature1, entity_feature2):
         
         flat_features = []
         for feature1, feature2 in zip(entity_feature1, entity_feature2):
@@ -128,7 +128,7 @@ class OurDataCollatorWithPadding:
     
     def _mask_entity(self, feature, prob=0.5):
 
-        input_ids = feature['entity_ids']
+        input_ids = feature['input_ids']
         if random.random() < prob:
             position_ids = feature['entity_position_ids'][0]
 
