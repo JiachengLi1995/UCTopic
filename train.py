@@ -315,11 +315,12 @@ def main():
         utils.JsonLine.dump(tokenized_corpus, path_tokenized_corpus)
         utils.JsonLine.dump(entity_pairs, path_entity_pairs)
 
-    tokenized_corpus = utils.JsonLine.load(path_tokenized_corpus)
-    entity_pairs = utils.JsonLine.load(path_entity_pairs)
+    tokenized_corpus = utils.JsonLine.load(path_tokenized_corpus, use_tqdm=True)
+    entity_pairs = utils.JsonLine.load(path_entity_pairs, use_tqdm=True)
     print(f'Successfully load {len(tokenized_corpus)} sentences, and {len(entity_pairs)} entity_pairs.')
     
-    model = UCTopicModel(model_args, config)        
+    model = UCTopicModel(model_args, config)
+    model.load_state_dict(torch.load('./result/uctopic_base_2/pytorch_model.bin'))   
     
     train_dict = {'entity_pairs': entity_pairs[:-100000]}
     dev_dict = {'entity_pairs': entity_pairs[-100000:]}
@@ -341,11 +342,12 @@ def main():
 
     # Training
     if training_args.do_train:
-        model_path = (
-            model_args.model_name_or_path
-            if (model_args.model_name_or_path is not None and os.path.isdir(model_args.model_name_or_path))
-            else None
-        )
+        model_path = './result/uctopic_base_2'
+        # (
+        #     model_args.model_name_or_path
+        #     if (model_args.model_name_or_path is not None and os.path.isdir(model_args.model_name_or_path))
+        #     else None
+        # )
         train_result = trainer.train(model_path=model_path)
         trainer.save_model()  # Saves the tokenizer too for easy upload
 

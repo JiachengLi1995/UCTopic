@@ -7,6 +7,54 @@ from transformers.models.roberta.modeling_roberta import RobertaLMHead
 from transformers.models.luke.modeling_luke import LukePreTrainedModel
 from transformers import LukeConfig, LukeModel
 
+class UCTopicConfig(LukeConfig):
+
+    def __init__(
+        self,
+        vocab_size=50267,
+        entity_vocab_size=500000,
+        hidden_size=768,
+        entity_emb_size=256,
+        num_hidden_layers=12,
+        num_attention_heads=12,
+        intermediate_size=3072,
+        hidden_act="gelu",
+        hidden_dropout_prob=0.1,
+        attention_probs_dropout_prob=0.1,
+        max_position_embeddings=512,
+        type_vocab_size=2,
+        initializer_range=0.02,
+        layer_norm_eps=1e-12,
+        gradient_checkpointing=False,
+        use_entity_aware_attention=True,
+        pad_token_id=1,
+        bos_token_id=0,
+        eos_token_id=2,
+        **kwargs
+    ):
+        super().__init__(
+            vocab_size,
+            entity_vocab_size,
+            hidden_size,
+            entity_emb_size,
+            num_hidden_layers,
+            num_attention_heads,
+            intermediate_size,
+            hidden_act,
+            hidden_dropout_prob,
+            attention_probs_dropout_prob,
+            max_position_embeddings,
+            type_vocab_size,
+            initializer_range,
+            layer_norm_eps,
+            gradient_checkpointing,
+            use_entity_aware_attention,
+            pad_token_id,
+            bos_token_id,
+            eos_token_id,
+            **kwargs
+        )
+
 class MLPLayer(nn.Module):
     """
     Head for getting sentence representations over RoBERTa/BERT's CLS representation.
@@ -245,3 +293,43 @@ class UCTopicModel(LukePreTrainedModel):
         )
 
         return outputs
+
+
+class UCTopic(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.luke = LukeModel(config)
+        self.config = config
+        self.mlp = MLPLayer(self.config)
+
+    def forward(self,
+        input_ids=None,
+        attention_mask=None,
+        token_type_ids=None,
+        entity_ids=None,
+        entity_attention_mask=None,
+        entity_token_type_ids=None,
+        entity_position_ids=None,
+        output_attentions=None,
+        output_hidden_states=None,
+        return_dict=None
+    ):
+
+        outputs = self.luke(
+            input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            entity_ids=entity_ids,
+            entity_attention_mask=entity_attention_mask,
+            entity_token_type_ids=entity_token_type_ids,
+            entity_position_ids=entity_position_ids,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+        if return_dict:
+            entity_pooler = outputs['entity_last_hidden_state'] # (bs, entity_length, hidden_size)
+        else:
+            entity_pooler = outputs.entity_last_hidden_state
+        entity_pooler = self.mlp(entity_pooler)
+        return outputs, entity_pooler

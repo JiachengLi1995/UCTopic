@@ -38,17 +38,17 @@ def get_batches(input_list, batch_size):
     return [input_list[i: i + batch_size] for i in range(0, len(input_list), batch_size)]
 
 
-# def get_possible_spans(word_idxs, num_wordpieces, max_word_gram, max_subword_gram):
-#     possible_spans = []
-#     num_words = len(word_idxs)
-#     max_gram = min(max_word_gram, num_words)
-#     for len_span in range(max_gram, 1, -1):
-#         for i in range(num_words - len_span + 1):
-#             l_idx = word_idxs[i]
-#             r_idx = word_idxs[i + len_span] - 1 if i + len_span < num_words else num_wordpieces - 1
-#             if r_idx - l_idx + 1 <= max_subword_gram:
-#                 possible_spans.append((l_idx, r_idx))
-#     return possible_spans
+def get_possible_spans(word_idxs, num_wordpieces, max_word_gram, max_subword_gram):
+    possible_spans = []
+    num_words = len(word_idxs)
+    max_gram = min(max_word_gram, num_words)
+    for len_span in range(max_gram, 1, -1):
+        for i in range(num_words - len_span + 1):
+            l_idx = word_idxs[i]
+            r_idx = word_idxs[i + len_span] - 1 if i + len_span < num_words else num_wordpieces - 1
+            if r_idx - l_idx + 1 <= max_subword_gram:
+                possible_spans.append((l_idx, r_idx))
+    return possible_spans
 
 
 class Log:
@@ -126,7 +126,7 @@ Json = OrJson
 
 class JsonLine(IO):
     @staticmethod
-    def load(path, use_tqdm=True):
+    def load(path, use_tqdm=False):
         with open(path) as rf:
             lines = rf.read().splitlines()
         if use_tqdm:

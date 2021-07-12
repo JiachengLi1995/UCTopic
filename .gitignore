@@ -1,0 +1,9 @@
+*.pyc
+*.json
+*.jsonl
+*.pickle
+*.tsv
+*.bin
+*.rackjesh
+*.pt
+*.txt
