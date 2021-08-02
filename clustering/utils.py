@@ -1,16 +1,17 @@
 import torch
 import json
+import numpy as np
+import random
 from scipy.optimize import linear_sum_assignment as hungarian
 from sklearn.metrics.cluster import normalized_mutual_info_score, adjusted_rand_score, adjusted_mutual_info_score
 
 def get_device(gpu):
     return torch.device('cpu' if gpu is None else f'cuda:{gpu}')
 
-def conll2003_reader(path):
+def dataset_reader(path, label_dict):
 
     print(f'Read data from {path}')
-    label_dict = {'PER':0, 'LOC':1, 'ORG':2}
-
+    
     data = []
     with open(path, "r", encoding='utf8') as f:
         lines = f.readlines()
@@ -47,6 +48,53 @@ def conll2003_reader(path):
 
     print(f'Read {len(data_processed)} instances from dataset CoNLL2003.')
     return data_processed
+
+def get_rankings(scores, positive_ratio = 0.8):
+    '''
+    scores: (samples, class_num)
+    '''
+    class_num = scores.shape[-1]
+    rankings = (-scores).argsort(axis=0) #(samples, class_num)
+    rankings = rankings[:int(len(rankings) * 1.0 / class_num * positive_ratio)]
+
+    return rankings
+
+def get_data(rankings, negative_numbers = 10):
+    '''
+    rankings: (samples, class_num)
+    '''
+    assert rankings.shape[0]>1 and rankings.shape[1]>1
+
+    data = []
+
+    for i in range(rankings.shape[0]):
+        for j in range(rankings.shape[1]):
+
+            anchor = rankings[i][j]
+
+            positive = np.random.choice(rankings[:, j])
+            while positive == anchor:
+                positive = np.random.choice(rankings[:, j])
+
+            negative_list = []
+            while len(negative_list) < negative_numbers:
+                for k in range(rankings.shape[1]):
+
+                    if k!=j:
+                        negative = np.random.choice(rankings[:, k])
+                        negative_list.append(negative)
+
+            data_line = [anchor] + [positive] + negative_list #[anchor, postive, negative, negative....]
+
+            data.append(data_line)
+
+    random.shuffle(data)
+    print(f'Generate {len(data)} contrastive training instances.')
+
+    return data
+                    
+
+
 
 def batchify(data, batch_size=32):
 

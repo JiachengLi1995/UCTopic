@@ -38,4 +38,27 @@ def get_kmeans(all_features, all_labels, num_classes):
 
     print("Clustering iterations:{}, L2 ACC:{:.3f}, Inner ACC:{:.3f}, Cosine ACC:{:.3f}".format(clustering_model.n_iter_, confusion.acc(), confusion_factor.acc(), confusion_cosine.acc()))
     
-    return score_factor, score_cosine
+    return score_factor, score_cosine, clustering_model.cluster_centers_
+
+
+def get_metric(features, centers, labels, num_classes):
+
+    normalized_features = preprocessing.normalize(np.concatenate((centers, features), axis=0))
+    centers, features = normalized_features[:num_classes], normalized_features[num_classes:]
+
+    confusion_factor = Confusion(num_classes)
+    score_factor = np.matmul(features, centers.transpose())
+    pred_labels_factor = score_factor.argmax(axis=-1)
+    pred_labels_factor = torch.tensor(pred_labels_factor)
+    confusion_factor.add(pred_labels_factor, labels)
+    confusion_factor.optimal_assignment(num_classes)
+
+    confusion_cosine = Confusion(num_classes)
+    score_cosine = cosine(features, centers)
+    pred_labels_cosine = score_cosine.argmax(axis=-1)
+    pred_labels_cosine = torch.tensor(pred_labels_cosine)
+    confusion_cosine.add(pred_labels_cosine, labels)
+    confusion_cosine.optimal_assignment(num_classes)
+
+    print("Inner ACC:{:.3f}, Cosine ACC:{:.3f}".format(confusion_factor.acc(), confusion_cosine.acc()))
+
