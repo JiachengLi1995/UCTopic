@@ -3,6 +3,7 @@
 import umap
 import numpy as np
 import matplotlib.pyplot as plt
+from sklearn import preprocessing
 plt.rcParams['font.size'] = '18'
 plt.rcParams["figure.figsize"] = [6.4, 4.8]
 #%%
@@ -13,6 +14,8 @@ def read_embedding(file_name):
     for line in f_embedding:
         line = np.array([float(ele) for ele in line.strip().split('\t')])
         embeddings.append(line)
+
+    embeddings = preprocessing.normalize(np.array(embeddings))
 
     f_embedding.close()
     return embeddings
@@ -43,8 +46,8 @@ def convert_and_filter_labels(embeddings, labels):
 
     # label_dict = {'/people/person/place_lived': 0, '/people/person/nationality': 1, '/location/administrative_division/country':3, '/location/country/capital':4}
     # 0: purple, 1: blue, 3: green, 4: capital
-    #label_dict = {'PER': 'b', 'LOC': 'r', 'ORG': 'g'}
-    label_dict = {'person': 'b', 'organization': 'r', 'time': 'g', 'location': 'y', }
+    label_dict = {'PER': 'b', 'LOC': 'r', 'ORG': 'g'}
+    #label_dict = {'person': 'b', 'organization': 'r', 'time': 'g', 'location': 'y', }
     #label_dict = {'Chemical': 'c', 'Disease':'y'}
     new_embeddings = []
     new_labels = []
@@ -117,8 +120,8 @@ def plot(embedding, labels, xlabel, file_name):
 
 
 #%%
-embedding_name = 'embedding_openentity.pickle_vectors.tsv'
-tags_name = 'embedding_openentity.pickle_meta.tsv'
+embedding_name = 'uctopic_pooling_embedding_conll2003.pickle_vectors.tsv'
+tags_name = 'uctopic_pooling_embedding_conll2003.pickle_meta.tsv'
 embeddings = read_embedding(embedding_name)
 labels = read_labels(tags_name)
 print(len(embeddings))
@@ -126,5 +129,5 @@ embeddings, labels = convert_and_filter_labels(embeddings, labels)
 #labels = convert_label_color(labels)
 print(len(embeddings))
 embedding = compute_umap(embeddings)
-plot(embedding, labels, 'LUKE Entity Representation (OpenEntity)','LUKE_openentity.png')
+plot(embedding, labels, 'UCTopic Pooling Entity Representation (CoNll)','uctopic_pooling_conll2003_1.png')
 # %%

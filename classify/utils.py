@@ -1,6 +1,7 @@
 import json
 from tqdm import tqdm
 import torch
+import numpy as np
 
 class TypingMetric:
     
@@ -142,6 +143,15 @@ class LabelField:
         self.id2label.update(label_field.id2label)
         self.label_num = label_field.label_num
 
+def create_target(label_num, label):
+
+    target = np.zeros(label_num) 
+
+    for ele in label:
+
+        target[ele] = 1
+
+    return target
 
 def process_dataset(dataset, label_field):
 
@@ -150,14 +160,18 @@ def process_dataset(dataset, label_field):
     for line in tqdm(dataset, desc='Processing dataset.', ncols=100):
 
         sentence = line['sent']
-        sentence = sentence.replace('-LRB-', '(')
-        sentence = sentence.replace('-RRB-', ')')
+        # sentence = sentence.replace('-LRB-', '(')
+        # sentence = sentence.replace('-RRB-', ')')
         start = line['start']
         end = line['end']
         
         label = [label_field.get_id(label) for label in line['labels']]
 
         processed.append([sentence, [(start, end)], label])
+
+    for line in processed:
+
+        line[2] = create_target(label_field.label_num, line[2])
 
     return processed
 
