@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributed as dist
+from torch.nn import Parameter
 
 from transformers.models.roberta.modeling_roberta import RobertaLMHead
 from transformers.models.luke.modeling_luke import LukePreTrainedModel
@@ -332,4 +333,95 @@ class UCTopic(nn.Module):
         else:
             entity_pooler = outputs.entity_last_hidden_state
         entity_pooler = self.mlp(entity_pooler)
-        return outputs, entity_pooler
+        return outputs, entity_pooler.squeeze()
+
+
+
+class UCTopicCluster(nn.Module):
+    def __init__(self, config, model_args, cluster_centers=None):
+        super().__init__()
+        self.luke = LukeModel(config)
+        self.config = config
+        self.mlp = MLPLayer(self.config)
+        self.alpha = model_args.alpha
+        self.sim = Similarity(temp=model_args.temp)
+
+        # Instance-CL head
+        
+        if cluster_centers is not None:
+
+            self.head = MLPLayer(self.config)
+
+            initial_cluster_centers = torch.tensor(
+                cluster_centers, dtype=torch.float, requires_grad=True)
+            self.cluster_centers = Parameter(initial_cluster_centers)
+
+    def forward(self,
+        input_ids=None,
+        attention_mask=None,
+        token_type_ids=None,
+        entity_ids=None,
+        entity_attention_mask=None,
+        entity_token_type_ids=None,
+        entity_position_ids=None,
+        output_attentions=None,
+        output_hidden_states=None,
+        return_dict=None
+    ):
+
+        outputs = self.luke(
+            input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            entity_ids=entity_ids,
+            entity_attention_mask=entity_attention_mask,
+            entity_token_type_ids=entity_token_type_ids,
+            entity_position_ids=entity_position_ids,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+        if return_dict:
+            entity_pooler = outputs['entity_last_hidden_state'] # (bs, entity_length, hidden_size)
+        else:
+            entity_pooler = outputs.entity_last_hidden_state
+        entity_pooler = self.mlp(entity_pooler)
+        return outputs, entity_pooler.squeeze()
+
+    def get_cl_loss(self, z1, z2):
+
+        cos_sim = self.sim(z1.unsqueeze(1), z2.unsqueeze(0))
+        labels = torch.arange(cos_sim.size(0)).long().to(cos_sim.device)
+
+        loss_fct = nn.CrossEntropyLoss()
+        loss = loss_fct(cos_sim, labels)
+        
+        return loss
+
+    def get_cluster_prob(self, embeddings, metric='cosine'):
+        if metric == 'l2':
+            dist = torch.sum((embeddings.unsqueeze(1) - self.cluster_centers) ** 2, 2)
+        else:
+            cos = nn.CosineSimilarity(dim=-1)
+            dist = 1 - cos(embeddings.unsqueeze(1), self.cluster_centers.unsqueeze(0))
+        numerator = 1.0 / (1.0 + (dist / self.alpha))
+        power = float(self.alpha + 1) / 2
+        numerator = numerator ** power
+        return numerator / torch.sum(numerator, dim=1, keepdim=True)
+
+    def local_consistency(self, embd0, embd1, embd2, criterion):
+        p0 = self.get_cluster_prob(embd0)
+        p1 = self.get_cluster_prob(embd1)
+        p2 = self.get_cluster_prob(embd2)
+        
+        lds1 = criterion(p1, p0)
+        lds2 = criterion(p2, p0)
+        return lds1+lds2
+
+    def update_cluster_centers(self, cluster_centers):
+
+        self.head = MLPLayer(self.config)
+
+        initial_cluster_centers = torch.tensor(
+                cluster_centers, dtype=torch.float, requires_grad=True)
+        self.cluster_centers = Parameter(initial_cluster_centers)

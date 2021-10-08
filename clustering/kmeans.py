@@ -7,6 +7,7 @@ from sklearn import preprocessing
 
 def get_kmeans(all_features, all_labels, num_classes):
 
+    all_features = all_features.numpy()
     all_features = preprocessing.normalize(all_features)
     print('Clustering with kmeans...')
     # Perform kmean clustering
@@ -14,6 +15,9 @@ def get_kmeans(all_features, all_labels, num_classes):
     clustering_model = KMeans(n_clusters=num_classes)
     clustering_model.fit(all_features)
     cluster_assignment = clustering_model.labels_
+
+    if all_labels is None:
+        return None, None, clustering_model.cluster_centers_
 
     true_labels = all_labels
     pred_labels = torch.tensor(cluster_assignment)    
@@ -39,6 +43,12 @@ def get_kmeans(all_features, all_labels, num_classes):
     print("Clustering iterations:{}, L2 ACC:{:.3f}, Inner ACC:{:.3f}, Cosine ACC:{:.3f}".format(clustering_model.n_iter_, confusion.acc(), confusion_factor.acc(), confusion_cosine.acc()))
     
     return score_factor, score_cosine, clustering_model.cluster_centers_
+
+def get_kmeans_centers(all_features, all_labels, num_classes):
+
+    _, _, centers = get_kmeans(all_features, all_labels, num_classes)
+
+    return centers
 
 
 def get_metric(features, centers, labels, num_classes):
