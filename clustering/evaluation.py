@@ -1,7 +1,7 @@
 import torch
 import numpy as np
-from utils import Confusion, get_features
-from sklearn import cluster
+from .utils import Confusion, get_features
+from sklearn import cluster, preprocessing
 
 def evaluate_embedding(data, tokenizer, model, args, step, logger):
     confusion, confusion_model = Confusion(args.num_classes), Confusion(args.num_classes)
@@ -16,6 +16,7 @@ def evaluate_embedding(data, tokenizer, model, args, step, logger):
 
     kmeans = cluster.KMeans(n_clusters=args.num_classes, random_state=args.seed)
     embeddings = all_embeddings.cpu().numpy()
+    embeddings = preprocessing.normalize(embeddings)
     kmeans.fit(embeddings)
     pred_labels = torch.tensor(kmeans.labels_.astype(np.int))
     # clustering accuracy 

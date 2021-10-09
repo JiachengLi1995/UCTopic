@@ -420,8 +420,8 @@ class UCTopicCluster(nn.Module):
 
     def update_cluster_centers(self, cluster_centers):
 
-        self.head = MLPLayer(self.config)
+        self.head = MLPLayer(self.config).to(self.luke.device)
 
         initial_cluster_centers = torch.tensor(
-                cluster_centers, dtype=torch.float, requires_grad=True)
+                cluster_centers, dtype=torch.float, requires_grad=True, device=self.luke.device)
         self.cluster_centers = Parameter(initial_cluster_centers)

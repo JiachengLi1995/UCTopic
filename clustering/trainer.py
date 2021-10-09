@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from tqdm import tqdm
+from .consts import TOKENIZER
 
 eps = 1e-8  
 
@@ -36,13 +36,15 @@ class ClusterLearner(nn.Module):
 		super(ClusterLearner, self).__init__()
 		self.model = model
 		self.optimizer = optimizer
-		self.cluster_loss = nn.KLDivLoss(size_average=False)
+		self.cluster_loss = nn.KLDivLoss(reduction='sum')
 		self.kcl = KCL()
 
 	def forward(self, inputs, use_perturbation=False):
-		_, embd0 = self.model(**inputs[0])
-		_, embd1 = self.model(**inputs[1])
-		_, embd2 = self.model(**inputs[2])
+		batch1, batch2, batch3 = inputs
+		
+		_, embd0 = self.model(**batch1)
+		_, embd1 = self.model(**batch2)
+		_, embd2 = self.model(**batch3)
 
 		# Instance-CL loss
 		feat1 = self.model.head(embd1)

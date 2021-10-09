@@ -3,7 +3,7 @@ import json
 import numpy as np
 import random
 from tqdm import tqdm
-from consts import ARGS, DEVICE
+from .consts import ARGS, DEVICE
 from scipy.optimize import linear_sum_assignment as hungarian
 from sklearn.metrics.cluster import normalized_mutual_info_score, adjusted_rand_score, adjusted_mutual_info_score
 from tensorboardX import SummaryWriter
@@ -14,15 +14,10 @@ def set_logger(path):
 	return tensorboard
 
 def update_logger(logger, losses=None, global_step=0):
-	print("[{}]-----".format(global_step))
 	if losses is not None:
 		for key, val in losses.items():
 			logger.add_scalar('train/'+key, val, global_step)
-			print("{}:\t {}".format(key, val))
 
-
-def get_device(gpu):
-	return torch.device('cpu' if gpu is None else f'cuda:{gpu}')
 
 def dataset_reader(path, label_dict):
 

@@ -1,15 +1,18 @@
 import argparse
+import torch
 from transformers import AutoTokenizer
 from nltk import WordNetLemmatizer
-from .utils import get_device
 
+def get_device(gpu):
+	return torch.device('cpu' if gpu is None else f'cuda:{gpu}')
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--gpu", type=str, default=None)
-    parser.add_argument("--data_path", type=str, default='data/conll2003/all_data.json')
+    parser.add_argument("--data_path", type=str, default='data/conll2003/all_data_small.json')
     parser.add_argument("--save_path", type=str, default='clustering_results/')
     parser.add_argument("--num_classes", type=int, default=3)
+    parser.add_argument("--preprocessing_num_workers", type=int, default=4)
     parser.add_argument("--use_luke", action='store_true')
     parser.add_argument("--epoch", type=int, default=10)
     parser.add_argument("--seed", type=int, default=999)

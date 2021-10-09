@@ -4,7 +4,7 @@ import random
 from tqdm import tqdm
 from uctopic.models import UCTopicCluster, UCTopicConfig
 from clustering.trainer import ClusterLearner
-from kmeans import get_kmeans_centers
+from clustering.kmeans import get_kmeans_centers
 from clustering.dataloader import get_train_loader
 from clustering.consts import ARGS, TOKENIZER, DEVICE
 from clustering.utils import dataset_reader, get_features, set_logger, update_logger
@@ -59,10 +59,19 @@ def main():
     # set up the trainer    
     learner = ClusterLearner(model, optimizer)
     model.train()
-    for _ in range(ARGS.epoch):
-        tqdm_dataloader = tqdm(train_loader, ncols=100)
+    for epoch in range(ARGS.epoch):
+        tqdm_dataloader = tqdm(train_loader, ncols=150)
         for features in tqdm_dataloader:
+
+            for feature in features:
+                for k, v in feature.items():
+                    feature[k] = v.to(DEVICE)
             loss = learner.forward(features, use_perturbation=ARGS.use_perturbation)
+
+            tqdm_dataloader.set_description(
+                'Epoch{}, Global Step {}, CL-loss {:.5f}, clustering-loss {:.5f}, consist-loss {:.5f} '.format(
+                    epoch, global_step,  loss['Instance-CL_loss'], loss['clustering_loss'], loss['local_consistency_loss']
+                    ))
 
             update_logger(logger, loss, global_step)
             global_step+=1

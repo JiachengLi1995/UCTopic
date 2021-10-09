@@ -8,7 +8,7 @@ from typing import Optional, Union, List, Dict, Tuple
 import torch.utils.data as util_data
 from itertools import combinations
 from torch.utils.data import Dataset
-from consts import TOKENIZER, LEMMATIZER
+from .consts import TOKENIZER, LEMMATIZER
 from multiprocessing import Pool
 
 def data_interface(data_line):
@@ -95,17 +95,13 @@ class ContrastClusteringDataset(Dataset):
         
         batch1 = TOKENIZER.pad(
             entity_feature1,
-            padding=self.padding,
-            max_length=self.max_length,
-            pad_to_multiple_of=self.pad_to_multiple_of,
+            padding=True,
             return_tensors="pt",
         )
 
         batch2 = TOKENIZER.pad(
             entity_feature2,
-            padding=self.padding,
-            max_length=self.max_length,
-            pad_to_multiple_of=self.pad_to_multiple_of,
+            padding=True,
             return_tensors="pt",
         )
 
@@ -123,7 +119,7 @@ class ContrastClusteringDataset(Dataset):
 
         for feature in features:
             
-            entity1, entity2 = feature['entity_pairs']
+            entity1, entity2 = feature
             sent_idx1, entity_idx1 = entity1
             sent_idx2, entity_idx2 = entity2
 
@@ -163,6 +159,9 @@ class ContrastClusteringDataset(Dataset):
 
                 input_ids[pos] = TOKENIZER.convert_tokens_to_ids(TOKENIZER.mask_token)
 
+            return input_ids
+
+        else:
             return input_ids
 
     def _collate_batch(self, examples, pad_to_multiple_of: Optional[int] = None):
@@ -218,7 +217,7 @@ class ContrastClusteringDataset(Dataset):
 def get_train_loader(args):
 
     train_dataset = ContrastClusteringDataset(args.data_path, args)
-    train_loader = util_data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    train_loader = util_data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=train_dataset.collate_fn)
 
     return train_loader
         
