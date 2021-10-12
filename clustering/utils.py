@@ -3,7 +3,7 @@ import json
 import numpy as np
 import random
 from tqdm import tqdm
-from .consts import ARGS, DEVICE
+from .consts import ARGS, DEVICE, LEMMATIZER
 from scipy.optimize import linear_sum_assignment as hungarian
 from sklearn.metrics.cluster import normalized_mutual_info_score, adjusted_rand_score, adjusted_mutual_info_score
 from tensorboardX import SummaryWriter
@@ -51,11 +51,12 @@ def dataset_reader(path, label_dict):
 			if label not in label_dict:
 				continue
 			span_text = ' '.join(sentence[span[0]:span[1]+1])
+			span_lemma_text = ' '.join([LEMMATIZER.lemmatize(word) for word in sentence[span[0]:span[1]+1]])
 
 			span_start = text.find(span_text)
 			span_end = span_start+len(span_text)
 		
-			data_processed.append({'text': text, 'span': [(span_start, span_end)], 'label': label_dict[label]})
+			data_processed.append({'text': text, 'span': [(span_start, span_end)], 'label': label_dict[label], 'span_lemma': span_lemma_text})
 
 	print(f'Read {len(data_processed)} instances from dataset CoNLL2003.')
 	return data_processed

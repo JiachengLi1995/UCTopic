@@ -335,8 +335,6 @@ class UCTopic(nn.Module):
         entity_pooler = self.mlp(entity_pooler)
         return outputs, entity_pooler.squeeze()
 
-
-
 class UCTopicCluster(nn.Module):
     def __init__(self, config, model_args, cluster_centers=None):
         super().__init__()
@@ -345,7 +343,7 @@ class UCTopicCluster(nn.Module):
         self.mlp = MLPLayer(self.config)
         self.alpha = model_args.alpha
         self.sim = Similarity(temp=model_args.temp)
-
+        self.softmax = nn.Softmax(dim=-1)
         # Instance-CL head
         
         if cluster_centers is not None:
@@ -388,26 +386,35 @@ class UCTopicCluster(nn.Module):
         entity_pooler = self.mlp(entity_pooler)
         return outputs, entity_pooler.squeeze()
 
-    def get_cl_loss(self, z1, z2):
+    def get_cl_loss(self, z0, z1, z2):
 
-        cos_sim = self.sim(z1.unsqueeze(1), z2.unsqueeze(0))
-        labels = torch.arange(cos_sim.size(0)).long().to(cos_sim.device)
+        z0 = z0.unsqueeze(1) ##(batch, 1, hidden_size)
+        z_ = torch.cat([z1.unsqueeze(1), z2.unsqueeze(1)], dim=1) ##(batch, 2, hidden_size)
 
-        loss_fct = nn.CrossEntropyLoss()
+        cos_sim = self.sim(z0, z_) ##(batch, 2)
+        label_size = cos_sim.size(0)
+        label_pos = torch.ones(label_size, device=z0.device, dtype=torch.float)
+        label_neg = torch.zeros(label_size, device=z0.device, dtype=torch.float) # (batch_size)
+        labels = torch.cat([label_pos.unsqueeze(1), label_neg.unsqueeze(1)], dim=1) ##(batch, 2)
+
+        loss_fct = nn.BCEWithLogitsLoss()
         loss = loss_fct(cos_sim, labels)
         
         return loss
 
-    def get_cluster_prob(self, embeddings, metric='cosine'):
-        if metric == 'l2':
-            dist = torch.sum((embeddings.unsqueeze(1) - self.cluster_centers) ** 2, 2)
-        else:
-            cos = nn.CosineSimilarity(dim=-1)
-            dist = 1 - cos(embeddings.unsqueeze(1), self.cluster_centers.unsqueeze(0))
-        numerator = 1.0 / (1.0 + (dist / self.alpha))
-        power = float(self.alpha + 1) / 2
-        numerator = numerator ** power
-        return numerator / torch.sum(numerator, dim=1, keepdim=True)
+    def get_cluster_prob(self, embeddings, metric='l2'):
+        # if metric == 'l2':
+        #     dist = torch.sum((embeddings.unsqueeze(1) - self.cluster_centers) ** 2, 2)
+        # else:
+        #     cos = nn.CosineSimilarity(dim=-1)
+        #     dist = 1 - cos(embeddings.unsqueeze(1), self.cluster_centers.unsqueeze(0))
+        # numerator = 1.0 / (1.0 + (dist / self.alpha))
+        # power = float(self.alpha + 1) / 2
+        # numerator = numerator ** power
+        # return numerator / torch.sum(numerator, dim=1, keepdim=True)
+
+        cos = self.sim(embeddings.unsqueeze(1), self.cluster_centers.unsqueeze(0))
+        return self.softmax(cos)
 
     def local_consistency(self, embd0, embd1, embd2, criterion):
         p0 = self.get_cluster_prob(embd0)
@@ -416,11 +423,13 @@ class UCTopicCluster(nn.Module):
         
         lds1 = criterion(p1, p0)
         lds2 = criterion(p2, p0)
+
         return lds1+lds2
 
     def update_cluster_centers(self, cluster_centers):
+        
 
-        self.head = MLPLayer(self.config).to(self.luke.device)
+        #self.head = MLPLayer(self.config).to(self.luke.device)
 
         initial_cluster_centers = torch.tensor(
                 cluster_centers, dtype=torch.float, requires_grad=True, device=self.luke.device)

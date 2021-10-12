@@ -50,6 +50,11 @@ def get_kmeans_centers(all_features, all_labels, num_classes):
 
     return centers
 
+def get_kmeans_prediction_and_centers(all_features, all_labels, num_classes):
+
+    _, score_cosine, centers = get_kmeans(all_features, all_labels, num_classes)
+    pred_labels_cosine = score_cosine.argmax(axis=-1)
+    return pred_labels_cosine, centers
 
 def get_metric(features, centers, labels, num_classes):
 

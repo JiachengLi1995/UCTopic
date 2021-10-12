@@ -4,7 +4,7 @@ import collections
 import random
 from tqdm import tqdm
 import torch
-from typing import Optional, Union, List, Dict, Tuple
+from typing import Optional
 import torch.utils.data as util_data
 from itertools import combinations
 from torch.utils.data import Dataset
@@ -47,7 +47,9 @@ def data_interface(data_line):
 
 class ContrastClusteringDataset(Dataset):
     
-    def __init__(self, data_path, data_args):
+    def __init__(self, data_path, data_args, pseudo_label_dict):
+
+        self.pseudo_label_dict = pseudo_label_dict
         dataset = []
         with open(data_path, encoding='utf8') as f:
             for line in tqdm(f, ncols=100, desc='Reading dataset...'):
@@ -62,10 +64,16 @@ class ContrastClusteringDataset(Dataset):
         pool.close()
         pool.join()
 
+        self.label_instance_dict = collections.defaultdict(list)
         entity_position_dict = collections.defaultdict(list)
         for sent_idx, sent_entity_list in tqdm(enumerate(doc_entity_list), ncols=100, desc='Extract entity positions'):
             for entity_idx, entity in enumerate(sent_entity_list):
-                entity_position_dict[entity].append((sent_idx, entity_idx))
+
+                if entity in pseudo_label_dict:
+                    entity_position_dict[entity].append((sent_idx, entity_idx, entity))
+                    self.label_instance_dict[pseudo_label_dict[entity]].append((sent_idx, entity_idx, entity))
+
+        self.label_list = list(self.label_instance_dict.keys())
 
         entity_position_filter_dict = dict()
         for key, value in entity_position_dict.items():
@@ -82,6 +90,13 @@ class ContrastClusteringDataset(Dataset):
         pool.join()
         print(f'Toal number of pairs: {len(self.entity_pairs)}')
 
+        pair_index = list(range(len(self.entity_pairs)))
+        random.shuffle(pair_index)
+        pair_index = pair_index[:data_args.max_training_examples]
+        self.entity_pairs = [self.entity_pairs[idx] for idx in pair_index]
+
+        print(f'The number of sampled pairs: {len(self.entity_pairs)}')
+
     def __len__(self):
         return len(self.entity_pairs)
 
@@ -91,8 +106,14 @@ class ContrastClusteringDataset(Dataset):
 
     def collate_fn(self, samples):
 
-        entity_feature1, entity_feature2 = self.extract_features(samples)
+        entity_feature0, entity_feature1, entity_feature2 = self.extract_features(samples)
         
+        batch0 = TOKENIZER.pad(
+            entity_feature0,
+            padding=True,
+            return_tensors="pt",
+        )
+
         batch1 = TOKENIZER.pad(
             entity_feature1,
             padding=True,
@@ -105,8 +126,7 @@ class ContrastClusteringDataset(Dataset):
             return_tensors="pt",
         )
 
-        batch0 = copy.deepcopy(batch1)
-        batch1['input_ids'], batch2['input_ids'] = self.mask_entity(entity_feature1, entity_feature2)
+        batch0['input_ids'], batch1['input_ids'], batch2['input_ids'] = self.mask_entity(entity_feature0, entity_feature1, entity_feature2)
 
         return [batch0, batch1, batch2]
 
@@ -116,35 +136,51 @@ class ContrastClusteringDataset(Dataset):
 
         entity_feature1 = []
         entity_feature2 = []
+        entity_feature3 = []
 
         for feature in features:
             
             entity1, entity2 = feature
-            sent_idx1, entity_idx1 = entity1
-            sent_idx2, entity_idx2 = entity2
+            sent_idx1, entity_idx1, entity_id1 = entity1
+            sent_idx2, entity_idx2, entity_id2 = entity2
+            ## sample negative instances
+            assert entity_id1 == entity_id2
+            label = self.pseudo_label_dict[entity_id1]
+            neg_label = random.choice(self.label_list)
+            while neg_label == label:
+                neg_label = random.choice(self.label_list)
+
+            neg_entity = random.choice(self.label_instance_dict[neg_label])
+            sent_idx3, entity_idx3, entity_id3 = neg_entity
+
 
             sent_feature1 = copy.deepcopy(self.tokenized_corpus[sent_idx1])
             sent_feature2 = copy.deepcopy(self.tokenized_corpus[sent_idx2])
+            sent_feature3 = copy.deepcopy(self.tokenized_corpus[sent_idx3])
 
             for name in entity_features_name:
                 sent_feature1[name] = [sent_feature1[name][entity_idx1]]
                 sent_feature2[name] = [sent_feature2[name][entity_idx2]]
+                sent_feature3[name] = [sent_feature3[name][entity_idx3]]
 
             entity_feature1.append(sent_feature1)
             entity_feature2.append(sent_feature2)
+            entity_feature3.append(sent_feature3)
 
-        return entity_feature1, entity_feature2
+        return entity_feature1, entity_feature2, entity_feature3
 
-    def mask_entity(self, entity_feature1, entity_feature2):
+    def mask_entity(self, entity_feature0, entity_feature1, entity_feature2):
 
+        masked_input_ids_0 = []
         masked_input_ids_1 = []
         masked_input_ids_2 = []
-        for feature1, feature2 in zip(entity_feature1, entity_feature2):
+        for feature0, feature1, feature2 in zip(entity_feature0, entity_feature1, entity_feature2):
             
-            masked_input_ids_1.append(self._mask_entity(feature1, prob=1))
+            masked_input_ids_0.append(self._mask_entity(feature0, prob=1))
+            masked_input_ids_1.append(self._mask_entity(feature1, prob=0.5))
             masked_input_ids_2.append(self._mask_entity(feature2, prob=0.5))
 
-        return self._collate_batch(masked_input_ids_1), self._collate_batch(masked_input_ids_2)
+        return self._collate_batch(masked_input_ids_0), self._collate_batch(masked_input_ids_1), self._collate_batch(masked_input_ids_2)
 
     
     def _mask_entity(self, feature, prob=0.5):
@@ -214,9 +250,12 @@ class ContrastClusteringDataset(Dataset):
         return list(combinations(entity_list, 2))
 
 
-def get_train_loader(args):
+def get_train_loader(args, pseudo_label_dict):
+    '''
+    pseudo_label_dict: phrase lemma --> clustering results
+    '''
 
-    train_dataset = ContrastClusteringDataset(args.data_path, args)
+    train_dataset = ContrastClusteringDataset(args.data_path, args, pseudo_label_dict)
     train_loader = util_data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=train_dataset.collate_fn)
 
     return train_loader
