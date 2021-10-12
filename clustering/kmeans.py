@@ -22,7 +22,7 @@ def get_kmeans(all_features, all_labels, num_classes):
     true_labels = all_labels
     pred_labels = torch.tensor(cluster_assignment)    
     print("all_embeddings:{}, centers:{}, true_labels:{}, pred_labels:{}".format(all_features.shape, clustering_model.cluster_centers_.shape, len(true_labels), len(pred_labels)))
-
+    
     confusion.add(pred_labels, true_labels)
     confusion.optimal_assignment(num_classes)
     

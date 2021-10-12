@@ -386,18 +386,17 @@ class UCTopicCluster(nn.Module):
         entity_pooler = self.mlp(entity_pooler)
         return outputs, entity_pooler.squeeze()
 
-    def get_cl_loss(self, z0, z1, z2):
+    def get_cl_loss(self, anchor_embd, cl_embd):
 
-        z0 = z0.unsqueeze(1) ##(batch, 1, hidden_size)
-        z_ = torch.cat([z1.unsqueeze(1), z2.unsqueeze(1)], dim=1) ##(batch, 2, hidden_size)
+        batch_size, hidden_size = anchor_embd.size()
+        anchor_embd = anchor_embd.unsqueeze(1) ##(batch, 1, hidden_size)
+        cl_embd = cl_embd.view([batch_size, -1, hidden_size])
 
-        cos_sim = self.sim(z0, z_) ##(batch, 2)
+        cos_sim = self.sim(anchor_embd, cl_embd) ##(batch, class_num)
         label_size = cos_sim.size(0)
-        label_pos = torch.ones(label_size, device=z0.device, dtype=torch.float)
-        label_neg = torch.zeros(label_size, device=z0.device, dtype=torch.float) # (batch_size)
-        labels = torch.cat([label_pos.unsqueeze(1), label_neg.unsqueeze(1)], dim=1) ##(batch, 2)
+        labels = torch.zeros(label_size, device=anchor_embd.device, dtype=torch.long) # (batch_size)
 
-        loss_fct = nn.BCEWithLogitsLoss()
+        loss_fct = nn.CrossEntropyLoss()
         loss = loss_fct(cos_sim, labels)
         
         return loss
@@ -428,9 +427,6 @@ class UCTopicCluster(nn.Module):
 
     def update_cluster_centers(self, cluster_centers):
         
-
-        #self.head = MLPLayer(self.config).to(self.luke.device)
-
         initial_cluster_centers = torch.tensor(
                 cluster_centers, dtype=torch.float, requires_grad=True, device=self.luke.device)
         self.cluster_centers = Parameter(initial_cluster_centers)

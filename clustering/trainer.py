@@ -40,14 +40,13 @@ class ClusterLearner(nn.Module):
 		self.kcl = KCL()
 
 	def forward(self, inputs, use_perturbation=False):
-		batch0, batch1, batch2 = inputs
+		anchor_batch, cl_batch = inputs
 		
-		_, embd0 = self.model(**batch0)  #anchor
-		_, embd1 = self.model(**batch1)	 #positive
-		_, embd2 = self.model(**batch2)  #negative
+		_, anchor_embd = self.model(**anchor_batch)  #anchor
+		_, cl_embd = self.model(**cl_batch)	 #positive
 
 		# Instance-CL loss
-		contrastive_loss = self.model.get_cl_loss(embd0, embd1, embd2)
+		contrastive_loss = self.model.get_cl_loss(anchor_embd, cl_embd)
 		loss = contrastive_loss
 
         # clustering loss

@@ -106,37 +106,30 @@ class ContrastClusteringDataset(Dataset):
 
     def collate_fn(self, samples):
 
-        entity_feature0, entity_feature1, entity_feature2 = self.extract_features(samples)
+        anchor_feature, cl_feature = self.extract_features(samples)
         
-        batch0 = TOKENIZER.pad(
-            entity_feature0,
+        anchor_batch = TOKENIZER.pad(
+            anchor_feature,
             padding=True,
             return_tensors="pt",
         )
 
-        batch1 = TOKENIZER.pad(
-            entity_feature1,
+        cl_batch = TOKENIZER.pad(
+            cl_feature,
             padding=True,
             return_tensors="pt",
         )
 
-        batch2 = TOKENIZER.pad(
-            entity_feature2,
-            padding=True,
-            return_tensors="pt",
-        )
+        anchor_batch['input_ids'], cl_batch['input_ids'] = self.mask_entity(anchor_feature, cl_feature)
 
-        batch0['input_ids'], batch1['input_ids'], batch2['input_ids'] = self.mask_entity(entity_feature0, entity_feature1, entity_feature2)
-
-        return [batch0, batch1, batch2]
+        return anchor_batch, cl_batch
 
     def extract_features(self, features):
 
         entity_features_name = ['entity_ids', 'entity_position_ids', 'entity_attention_mask']
 
-        entity_feature1 = []
-        entity_feature2 = []
-        entity_feature3 = []
+        anchor_feature = []
+        cl_feature = []
 
         for feature in features:
             
@@ -146,41 +139,40 @@ class ContrastClusteringDataset(Dataset):
             ## sample negative instances
             assert entity_id1 == entity_id2
             label = self.pseudo_label_dict[entity_id1]
-            neg_label = random.choice(self.label_list)
-            while neg_label == label:
-                neg_label = random.choice(self.label_list)
 
-            neg_entity = random.choice(self.label_instance_dict[neg_label])
-            sent_idx3, entity_idx3, entity_id3 = neg_entity
+            entity_list = [entity1, entity2]
+            for neg_label in self.label_list:
+                if neg_label != label:
+                    neg_entity = random.choice(self.label_instance_dict[neg_label])
+                    entity_list.append(neg_entity)
+                    
 
+            for idx, entity in enumerate(entity_list):
+                sent_idx, entity_idx, entity_id = entity
+                sent_feature = copy.deepcopy(self.tokenized_corpus[sent_idx])
+                for name in entity_features_name:
+                    sent_feature[name] = [sent_feature[name][entity_idx]]
 
-            sent_feature1 = copy.deepcopy(self.tokenized_corpus[sent_idx1])
-            sent_feature2 = copy.deepcopy(self.tokenized_corpus[sent_idx2])
-            sent_feature3 = copy.deepcopy(self.tokenized_corpus[sent_idx3])
+                if idx == 0: ## anchor
+                    anchor_feature.append(sent_feature)
 
-            for name in entity_features_name:
-                sent_feature1[name] = [sent_feature1[name][entity_idx1]]
-                sent_feature2[name] = [sent_feature2[name][entity_idx2]]
-                sent_feature3[name] = [sent_feature3[name][entity_idx3]]
+                else:
+                    cl_feature.append(sent_feature)
 
-            entity_feature1.append(sent_feature1)
-            entity_feature2.append(sent_feature2)
-            entity_feature3.append(sent_feature3)
+        return anchor_feature, cl_feature
 
-        return entity_feature1, entity_feature2, entity_feature3
+    def mask_entity(self, anchor_feature, cl_feature):
 
-    def mask_entity(self, entity_feature0, entity_feature1, entity_feature2):
+        anchor_input_ids = []
+        cl_input_ids = []
 
-        masked_input_ids_0 = []
-        masked_input_ids_1 = []
-        masked_input_ids_2 = []
-        for feature0, feature1, feature2 in zip(entity_feature0, entity_feature1, entity_feature2):
-            
-            masked_input_ids_0.append(self._mask_entity(feature0, prob=1))
-            masked_input_ids_1.append(self._mask_entity(feature1, prob=0.5))
-            masked_input_ids_2.append(self._mask_entity(feature2, prob=0.5))
+        for feature in anchor_feature:
+            anchor_input_ids.append(self._mask_entity(feature, prob=1))
 
-        return self._collate_batch(masked_input_ids_0), self._collate_batch(masked_input_ids_1), self._collate_batch(masked_input_ids_2)
+        for feature in cl_feature:
+            cl_input_ids.append(self._mask_entity(feature, prob=0.5))
+
+        return self._collate_batch(anchor_input_ids), self._collate_batch(cl_input_ids)
 
     
     def _mask_entity(self, feature, prob=0.5):

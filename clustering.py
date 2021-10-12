@@ -405,6 +405,11 @@ def main():
         label_dict = {'PER':0, 'LOC':1, 'ORG':2}
     elif 'bc5cdr' in ARGS.data_path:
         label_dict = {'Chemical': 0, 'Disease': 1}
+    elif 'mitmovie' in ARGS.data_path:
+        label_dict = {'person': 0, 'title': 1}
+    elif 'wnut2017' in ARGS.data_path:
+        label_dict = {'corporation': 0, 'creative_work':1, 'group': 2,
+                      'location': 3, 'person': 4, 'product': 5}
     else:
         raise NotImplementedError
 
