@@ -9,7 +9,7 @@ from transformers.models import luke
 from clustering.utils import dataset_reader, get_device, batchify, get_data, get_rankings, Confusion
 from clustering.kmeans import get_kmeans, get_metric
 from uctopic.models import UCTopicConfig, UCTopic, Similarity
-from transformers import LukeTokenizer, LukeModel, AdamW
+from transformers import LukeTokenizer, LukeModel, AdamW, BertTokenizer, BertModel
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -35,24 +35,90 @@ def get_features(data, tokenizer, model):
     all_features = []
     all_labels = []
 
-    for batch in tqdm(batchify(data, ARGS.batch_size), ncols=100, desc='Generate all features...'):
+    with torch.no_grad():
 
-        text_batch, span_batch, label_batch = batch
+        for batch in tqdm(batchify(data, ARGS.batch_size), ncols=100, desc='Generate all features...'):
 
-        inputs = tokenizer(text_batch, entity_spans=span_batch, padding=True, add_prefix_space=True, return_tensors="pt")
+            text_batch, span_batch, label_batch = batch
 
-        for k,v in inputs.items():
-            inputs[k] = v.to(DEVICE)
+            inputs = tokenizer(text_batch, entity_spans=span_batch, padding=True, add_prefix_space=True, return_tensors="pt")
 
-        luke_outputs, entity_pooling = model(**inputs)
-        if ARGS.use_luke:
-            all_features.append(luke_outputs.entity_last_hidden_state.squeeze().detach().cpu())
-        else:
-            all_features.append(entity_pooling.squeeze().detach().cpu())
+            for k,v in inputs.items():
+                inputs[k] = v.to(DEVICE)
 
-        all_labels += label_batch
+            luke_outputs, entity_pooling = model(**inputs)
+            if ARGS.use_luke:
+                all_features.append(luke_outputs.entity_last_hidden_state.squeeze().detach().cpu())
+            else:
+                all_features.append(entity_pooling.squeeze().detach().cpu())
 
-    all_features = torch.cat(all_features, dim=0).numpy()
+            all_labels += label_batch
+
+    all_features = torch.cat(all_features, dim=0)
+    all_labels = torch.LongTensor(all_labels)
+
+    return all_features, all_labels
+
+def get_bert_features(data, pooling = 'ending'):
+
+    all_features = []
+    all_labels = []
+    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+    model = BertModel.from_pretrained('bert-base-uncased')
+    model.eval()
+    model.to(DEVICE)
+
+    def convert_span(text_batch, span_batch):
+
+        word_spans = []
+
+        for text, span in zip(text_batch, span_batch):
+
+            span = span[0]
+
+            start = len(tokenizer.tokenize(text[:span[0]]))
+            end = len(tokenizer.tokenize(text[span[0]:span[1]])) + start
+            word_spans.append((start, end))
+
+        return word_spans
+
+    with torch.no_grad():
+
+        for batch in tqdm(batchify(data, ARGS.batch_size), ncols=100, desc='Generate all features...'):
+
+            text_batch, span_batch, label_batch = batch
+
+            span_batch = convert_span(text_batch, span_batch)
+
+            inputs = tokenizer(text_batch, padding=True, return_tensors="pt")
+
+            for k,v in inputs.items():
+                inputs[k] = v.to(DEVICE)
+
+            outputs = model(**inputs)
+            print(outputs)
+            print(outputs.last_hidden_state)
+            last_hidden_state = outputs.last_hidden_state
+
+            for i, span, label in enumerate(zip(span_batch, label_batch)):
+
+                start, end = span
+                if pooling == 'ending':
+                    entity_pooling = torch.cat([last_hidden_state[i][start], last_hidden_state[i][end-1]], dim=0)
+
+                elif pooling == 'mean':
+
+                    entity_pooling = (last_hidden_state[i][start] + last_hidden_state[i][end-1]) / 2
+
+                else:
+
+                    raise NotImplementedError()
+                
+                all_features.append(entity_pooling.squeeze().detach().cpu())
+
+                all_labels.append(label)
+
+    all_features = torch.stack(all_features, dim=0)
     all_labels = torch.LongTensor(all_labels)
 
     return all_features, all_labels
@@ -419,12 +485,13 @@ def main():
 
     data = train_data + dev_data + test_data
 
-    features, labels = get_features(data, tokenizer, model)
+    #features, labels = get_features(data, tokenizer, model)
+    features, labels = get_bert_features(data, pooling='ending')
     score_factor, score_cosine, cluster_centers = get_kmeans(features, labels, ARGS.num_classes)
 
     #contrastive_learning(features, score_cosine, labels, config)
     #classifier(features, score_cosine, labels, config)
-    autoencoder(features, labels, config, cluster_centers)
+    #autoencoder(features, labels, config, cluster_centers)
     
 
     

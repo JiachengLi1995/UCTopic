@@ -8,6 +8,8 @@ from scipy.optimize import linear_sum_assignment as hungarian
 from sklearn.metrics.cluster import normalized_mutual_info_score, adjusted_rand_score, adjusted_mutual_info_score
 from tensorboardX import SummaryWriter
 
+def get_device(gpu):
+    return torch.device('cpu' if gpu is None else f'cuda:{gpu}')
 
 def set_logger(path):
 	tensorboard = SummaryWriter(path)
