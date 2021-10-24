@@ -96,11 +96,9 @@ def get_bert_features(data, pooling = 'ending'):
                 inputs[k] = v.to(DEVICE)
 
             outputs = model(**inputs)
-            print(outputs)
-            print(outputs.last_hidden_state)
             last_hidden_state = outputs.last_hidden_state
 
-            for i, span, label in enumerate(zip(span_batch, label_batch)):
+            for i, (span, label) in enumerate(zip(span_batch, label_batch)):
 
                 start, end = span
                 if pooling == 'ending':
