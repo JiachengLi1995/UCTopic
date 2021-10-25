@@ -78,4 +78,6 @@ def get_metric(features, centers, labels, num_classes):
     confusion_cosine.optimal_assignment(num_classes)
 
     print("Inner ACC:{:.3f}, Cosine ACC:{:.3f}".format(confusion_factor.acc(), confusion_cosine.acc()))
+    print('Inner Clustering scores:', confusion_factor.clusterscores()) 
+    print('Cosine Clustering scores:',confusion_cosine.clusterscores()) 
 

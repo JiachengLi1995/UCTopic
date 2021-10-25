@@ -35,6 +35,8 @@ def main():
     else:
         raise NotImplementedError
 
+    ARGS.num_classes = len(label_dict)
+
     config = UCTopicConfig.from_pretrained("studio-ousia/luke-base")
     model = UCTopicCluster(config, ARGS)
     model.load_state_dict(torch.load('result/pytorch_model.bin'), strict= False)
@@ -45,7 +47,7 @@ def main():
     features, labels = get_features(clustering_data, TOKENIZER, model)
     score_factor, score_cosine, cluster_centers = get_kmeans(features, labels, ARGS.num_classes)
 
-    rankings = get_rankings(score_cosine, positive_ratio=0.2)
+    rankings = get_rankings(score_cosine, positive_ratio=0.05)
 
     pseudo_label_dict = defaultdict(list)
 

@@ -9,11 +9,11 @@ def get_device(gpu):
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--gpu", type=str, default=None)
-    parser.add_argument("--data_path", type=str, default='data/bc5cdr/all_data.json')
+    parser.add_argument("--data_path", type=str, default='data/mitmovie/all_data.json')
     parser.add_argument("--save_path", type=str, default='clustering_results/')
     parser.add_argument("--num_classes", type=int, default=2)
     parser.add_argument("--max_training_examples", type=int, default=100000)
-    parser.add_argument("--steps_per_eval", type=int, default=40)
+    parser.add_argument("--steps_per_eval", type=int, default=50)
     parser.add_argument("--preprocessing_num_workers", type=int, default=4)
     parser.add_argument("--use_luke", action='store_true')
     parser.add_argument("--epoch", type=int, default=10)

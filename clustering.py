@@ -14,7 +14,7 @@ from transformers import LukeTokenizer, LukeModel, AdamW, BertTokenizer, BertMod
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--gpu", type=str, default=None)
-    parser.add_argument("--data_path", type=str, default='data/conll2003/')
+    parser.add_argument("--data_path", type=str, default='data/wnut2017/')
     parser.add_argument("--save_path", type=str, default='result/project_head.bin')
     parser.add_argument("--num_classes", type=int, default=3)
     parser.add_argument("--use_luke", action='store_true')
@@ -82,13 +82,36 @@ def get_bert_features(data, pooling = 'ending'):
 
         return word_spans
 
+    def mask_span(text_batch, span_batch):
+
+        word_spans = []
+        new_text_batch = []
+        for text, span in zip(text_batch, span_batch):
+
+            span = span[0]
+
+            start = len(tokenizer.tokenize(text[:span[0]]))
+            new_text = text[:span[0]] + '[MASK]' + text[span[1]:]
+            word_spans.append((start, start))
+
+            assert tokenizer.tokenize(new_text)[start] == '[MASK]'
+            new_text_batch.append(new_text)
+
+        return new_text_batch, word_spans
+
     with torch.no_grad():
 
         for batch in tqdm(batchify(data, ARGS.batch_size), ncols=100, desc='Generate all features...'):
 
             text_batch, span_batch, label_batch = batch
 
-            span_batch = convert_span(text_batch, span_batch)
+            if pooling == 'mask':
+
+                text_batch, span_batch = mask_span(text_batch, span_batch)
+            
+            else:
+
+                span_batch = convert_span(text_batch, span_batch)
 
             inputs = tokenizer(text_batch, padding=True, return_tensors="pt")
 
@@ -107,6 +130,10 @@ def get_bert_features(data, pooling = 'ending'):
                 elif pooling == 'mean':
 
                     entity_pooling = (last_hidden_state[i][start] + last_hidden_state[i][end-1]) / 2
+                
+                elif pooling == 'mask':
+
+                    entity_pooling = last_hidden_state[i][start]
 
                 else:
 
@@ -281,7 +308,7 @@ def classifier(features, scores, labels, config):
     confusion.optimal_assignment(ARGS.num_classes)
 
     print(f'After confusion acc: {confusion.acc()}')
-
+    print('Clustering scores:',confusion.clusterscores())
 
 def autoencoder(features, labels, config, cluster_centers):
 
@@ -476,6 +503,8 @@ def main():
                       'location': 3, 'person': 4, 'product': 5}
     else:
         raise NotImplementedError
+
+    ARGS.num_classes = len(label_dict)
 
     train_data = dataset_reader(train_path, label_dict)
     dev_data = dataset_reader(dev_path, label_dict)
