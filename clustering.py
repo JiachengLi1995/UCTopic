@@ -5,15 +5,17 @@ import argparse
 import os
 import random
 from tqdm import tqdm
+import numpy as np
 from transformers.models import luke
 from clustering.utils import dataset_reader, get_device, batchify, get_data, get_rankings, Confusion
 from clustering.kmeans import get_kmeans, get_metric
 from uctopic.models import UCTopicConfig, UCTopic, Similarity
 from transformers import LukeTokenizer, LukeModel, AdamW, BertTokenizer, BertModel
+from sentence_transformers import SentenceTransformer
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--gpu", type=str, default=None)
+    parser.add_argument("--gpu", type=int, default=None)
     parser.add_argument("--data_path", type=str, default='data/wnut2017/')
     parser.add_argument("--save_path", type=str, default='result/project_head.bin')
     parser.add_argument("--num_classes", type=int, default=3)
@@ -30,10 +32,13 @@ def parse_args():
 ARGS = parse_args()
 DEVICE = get_device(ARGS.gpu)
 
-def get_features(data, tokenizer, model):
+def get_phrase_bert_features(data):
 
     all_features = []
     all_labels = []
+    model = SentenceTransformer('./phrase-bert-model/pooled_context_para_triples_p=0.8/0_BERT')
+    model.eval()
+    model.to(DEVICE)
 
     with torch.no_grad():
 
@@ -41,7 +46,113 @@ def get_features(data, tokenizer, model):
 
             text_batch, span_batch, label_batch = batch
 
+            phrase_list = []
+            for text, span, label in zip(text_batch, span_batch, label_batch):
+
+                span = span[0]
+                start, end = span
+                phrase_list.append(text[start:end])
+                all_labels.append(label)
+
+            repr_list = model.encode(phrase_list)
+
+            all_features+=list(repr_list)
+
+    all_features = torch.FloatTensor(all_features)
+    all_labels = torch.LongTensor(all_labels)
+
+    return all_features, all_labels
+
+
+
+def get_glove_features(data, label_dict):
+
+    all_features = []
+    all_labels = []
+
+    word_feature_dict = dict()
+    with open('glove.6B.300d.txt') as f:
+        for line in tqdm(f, desc='Reading Glove.', ncols=100):
+            line = line.strip().split(' ')
+            assert len(line) == 301
+            word_feature_dict[line[0]] = np.array([float(number) for number in line[1:]])
+    total = 0
+    zero = 0
+    for batch in tqdm(data, ncols=100, desc='Generate all features...'):
+
+        sentence, spans, ner_labels = batch
+
+        for span, label in zip(spans, ner_labels):
+            if label in label_dict:
+                all_labels.append(label_dict[label])
+            else:
+                continue
+
+            total += 1
+            start, end = span
+            phrase_tokens = [token.lower() for token in sentence[start:end+1]]
+            phrase_repr = [word_feature_dict[token] for token in phrase_tokens if token in word_feature_dict]
+            if len(phrase_repr)==0:
+                phrase_repr=np.zeros(300)
+                zero += 1
+            else:
+                phrase_repr = np.array(phrase_repr).mean(axis=0)
+            assert phrase_repr.shape[0] == 300
+            all_features.append(phrase_repr)
+            
+    print(zero/total)
+    all_features = torch.FloatTensor(all_features)
+    all_labels = torch.LongTensor(all_labels)
+
+    return all_features, all_labels
+
+
+
+def get_features(data, tokenizer, model):
+
+    all_features = []
+    all_labels = []
+
+    def get_mentions(text_batch, span_batch):
+
+        mention_batch = []
+        new_span_batch = []
+        for text, span in zip(text_batch, span_batch):
+
+            span = span[0]
+            phrase_mention = text[span[0]:span[1]]
+            mention_batch.append(phrase_mention)
+            new_span_batch.append([(0, len(phrase_mention))])
+
+        return mention_batch, new_span_batch
+
+    def get_contexts(inputs):
+
+        input_ids_batch = inputs['input_ids']
+        entity_position_ids_batch = inputs['entity_position_ids']
+
+        for input_ids, entity_position_ids in zip(input_ids_batch, entity_position_ids_batch):
+
+            position_ids = entity_position_ids[0]
+
+            for pos in position_ids:
+                if pos == -1:
+                    break
+
+                input_ids[pos] = tokenizer.convert_tokens_to_ids(tokenizer.mask_token)
+
+        return inputs
+
+
+
+    with torch.no_grad():
+
+        for batch in tqdm(batchify(data, ARGS.batch_size), ncols=100, desc='Generate all features...'):
+
+            text_batch, span_batch, label_batch = batch
+            
             inputs = tokenizer(text_batch, entity_spans=span_batch, padding=True, add_prefix_space=True, return_tensors="pt")
+            #inputs = get_contexts(inputs)
 
             for k,v in inputs.items():
                 inputs[k] = v.to(DEVICE)
@@ -129,7 +240,7 @@ def get_bert_features(data, pooling = 'ending'):
 
                 elif pooling == 'mean':
 
-                    entity_pooling = (last_hidden_state[i][start] + last_hidden_state[i][end-1]) / 2
+                    entity_pooling = torch.stack([last_hidden_state[i][j] for j in range(start, end)], dim=0).mean(dim=0)
                 
                 elif pooling == 'mask':
 
@@ -506,14 +617,16 @@ def main():
 
     ARGS.num_classes = len(label_dict)
 
-    train_data = dataset_reader(train_path, label_dict)
-    dev_data = dataset_reader(dev_path, label_dict)
-    test_data = dataset_reader(test_path, label_dict)
+    train_data = dataset_reader(train_path, label_dict, token_level=False)
+    dev_data = dataset_reader(dev_path, label_dict, token_level=False)
+    test_data = dataset_reader(test_path, label_dict, token_level=False)
 
     data = train_data + dev_data + test_data
 
-    #features, labels = get_features(data, tokenizer, model)
-    features, labels = get_bert_features(data, pooling='ending')
+    features, labels = get_features(data, tokenizer, model)
+    #features, labels = get_bert_features(data, pooling='mask')
+    #features, labels = get_glove_features(data, label_dict)
+    #features, labels = get_phrase_bert_features(data)
     score_factor, score_cosine, cluster_centers = get_kmeans(features, labels, ARGS.num_classes)
 
     #contrastive_learning(features, score_cosine, labels, config)

@@ -3,6 +3,7 @@ from clustering.utils import Confusion
 from sklearn.cluster import KMeans
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity as cosine
+from sklearn.metrics import silhouette_score
 from sklearn import preprocessing
 
 def get_kmeans(all_features, all_labels, num_classes):
@@ -16,8 +17,11 @@ def get_kmeans(all_features, all_labels, num_classes):
     clustering_model.fit(all_features)
     cluster_assignment = clustering_model.labels_
 
+    score_factor = np.matmul(all_features, clustering_model.cluster_centers_.transpose())
+    score_cosine = cosine(all_features, clustering_model.cluster_centers_)
+
     if all_labels is None:
-        return None, None, clustering_model.cluster_centers_
+        return score_factor, score_cosine, clustering_model.cluster_centers_
 
     true_labels = all_labels
     pred_labels = torch.tensor(cluster_assignment)    
@@ -79,5 +83,16 @@ def get_metric(features, centers, labels, num_classes):
 
     print("Inner ACC:{:.3f}, Cosine ACC:{:.3f}".format(confusion_factor.acc(), confusion_cosine.acc()))
     print('Inner Clustering scores:', confusion_factor.clusterscores()) 
-    print('Cosine Clustering scores:',confusion_cosine.clusterscores()) 
+    print('Cosine Clustering scores:',confusion_cosine.clusterscores())
 
+
+def get_kmeans_score(all_features, num_classes):
+
+    all_features = all_features.numpy()
+    all_features = preprocessing.normalize(all_features)
+
+    clustering_model = KMeans(n_clusters=num_classes)
+    labels = clustering_model.fit_predict(all_features)
+    silhouette = silhouette_score(all_features, labels)
+
+    return silhouette

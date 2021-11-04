@@ -47,7 +47,7 @@ def main():
     features, labels = get_features(clustering_data, TOKENIZER, model)
     score_factor, score_cosine, cluster_centers = get_kmeans(features, labels, ARGS.num_classes)
 
-    rankings = get_rankings(score_cosine, positive_ratio=0.05)
+    rankings = get_rankings(score_cosine, positive_ratio=0.1)
 
     pseudo_label_dict = defaultdict(list)
 

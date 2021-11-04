@@ -21,7 +21,7 @@ def update_logger(logger, losses=None, global_step=0):
 			logger.add_scalar('train/'+key, val, global_step)
 
 
-def dataset_reader(path, label_dict):
+def dataset_reader(path, label_dict, token_level=False):
 
 	print(f'Read data from {path}')
 	
@@ -40,6 +40,10 @@ def dataset_reader(path, label_dict):
 			if len(ner_labels)==0:
 				continue
 			data.append([sentence, spans, ner_labels])
+	if token_level:
+		return data
+
+	#phrase_set = set()
 
 	data_processed = []
 	for line in data:
@@ -54,6 +58,11 @@ def dataset_reader(path, label_dict):
 				continue
 			span_text = ' '.join(sentence[span[0]:span[1]+1])
 			span_lemma_text = ' '.join([LEMMATIZER.lemmatize(word) for word in sentence[span[0]:span[1]+1]])
+
+			# if span_text.lower() in phrase_set:
+			# 	continue
+			# else:
+			# 	phrase_set.add(span_text.lower())
 
 			span_start = text.find(span_text)
 			span_end = span_start+len(span_text)
