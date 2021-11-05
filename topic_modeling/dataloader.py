@@ -115,10 +115,18 @@ class ContrastClusteringDataset(Dataset):
             label = self.pseudo_label_dict[entity_id1]
 
             entity_list = [entity1, entity2]
-            for neg_label in random.sample(self.label_list, min(self.data_args.contrastive_num, len(self.label_list))):
-                if neg_label != label:
-                    neg_entity = random.choice(self.label_instance_dict[neg_label])
-                    entity_list.append(neg_entity)
+
+            neg_list = []
+            while len(neg_list) < min(self.data_args.contrastive_num, len(self.label_list)):
+                neg_label = random.choice(self.label_list)
+                while neg_label == label:
+                    neg_label = random.choice(self.label_list)
+                neg_list.append(neg_label)
+
+            for neg_label in neg_list:
+                
+                neg_entity = random.choice(self.label_instance_dict[neg_label])
+                entity_list.append(neg_entity)
 
             for idx, entity in enumerate(entity_list):
                 sent_idx, entity_idx, entity_id = entity

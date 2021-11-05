@@ -69,3 +69,27 @@ def get_features(sentence_dict, phrase_list, model, return_prob=False):
 		return all_features, all_probs
 
 	return all_features
+
+
+def get_probs(sentence_dict, phrase_list, model):
+
+	all_probs = []
+
+	for batch in tqdm(batchify(sentence_dict, phrase_list, ARGS.batch_size), ncols=100, desc='Generate all features...'):
+
+		text_batch, span_batch = batch
+
+		inputs = TOKENIZER(text_batch, entity_spans=span_batch, padding=True, add_prefix_space=True, return_tensors="pt")
+
+		for k,v in inputs.items():
+			inputs[k] = v.to(DEVICE)
+
+		with torch.no_grad():
+			luke_outputs, entity_pooling = model(**inputs)
+
+		model_prob = model.get_cluster_prob(entity_pooling)
+
+		all_probs.append(model_prob.detach().cpu())
+
+	all_probs = torch.cat(all_probs, dim=0)
+	return all_probs
