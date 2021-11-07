@@ -5,13 +5,13 @@ from .consts import ARGS, DEVICE, TOKENIZER
 
 
 def read_data(path):
-    data = []
-    with open(path, encoding='utf8') as f:
-        for line in f:
-            line = json.loads(line)
-            data.append(line)
+	data = []
+	with open(path, encoding='utf8') as f:
+		for line in f:
+			line = json.loads(line)
+			data.append(line)
 
-    return data
+	return data
 
 def batchify(sentence_dict, phrase_list_sampled, batch_size=32):
 
@@ -93,3 +93,31 @@ def get_probs(sentence_dict, phrase_list, model):
 
 	all_probs = torch.cat(all_probs, dim=0)
 	return all_probs
+
+
+
+
+def get_all_phrase_bert_features(sentence_dict, phrase_list, model):
+
+	all_features = []
+
+	with torch.no_grad():
+
+		for batch in tqdm(batchify(sentence_dict, phrase_list, ARGS.batch_size), ncols=100, desc='Generate all features...'):
+
+			text_batch, span_batch = batch
+
+			phrase_list = []
+			for text, span in zip(text_batch, span_batch):
+
+				span = span[0]
+				start, end = span
+				phrase_list.append(text[start:end])
+
+			repr_list = model.encode(phrase_list)
+
+			all_features+=list(repr_list)
+
+	all_features = torch.FloatTensor(all_features)
+	
+	return all_features

@@ -12,7 +12,7 @@ import pickle
 from multiprocessing import Pool
 from collections import defaultdict, Counter
 from transformers import LukeTokenizer, LukeModel, AdamW, BertTokenizer, BertModel
-from sentence_transformers import SentenceTransformer
+#from sentence_transformers import SentenceTransformer
 from clustering.utils import get_rankings, set_logger, update_logger
 from clustering.kmeans import get_kmeans, get_metric, get_kmeans_score
 from topic_modeling.dataloader import get_train_loader
@@ -174,7 +174,7 @@ def main():
     kmeans_scores = sorted(kmeans_scores, key=lambda x: x[1], reverse=True)
     num_class = kmeans_scores[0][0]
     print('We select the number of topics: ', num_class)
-    #num_class = 20
+    #num_class = 22
 
     ## To finetune, we randomly sample part of phrases
     phrase_list_sampled = random.sample(phrase_list, min(ARGS.sample_num_finetune, len(phrase_list)))    
