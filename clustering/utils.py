@@ -82,7 +82,7 @@ def get_rankings(scores, positive_ratio = 0.8):
 
 	return rankings
 
-def get_data(rankings, negative_numbers = 10):
+def get_data(rankings, negative_numbers = 10, in_batch=False):
 	'''
 	rankings: (samples, class_num)
 	'''
@@ -99,15 +99,20 @@ def get_data(rankings, negative_numbers = 10):
 			while positive == anchor:
 				positive = np.random.choice(rankings[:, j])
 
-			negative_list = []
-			while len(negative_list) < negative_numbers:
-				for k in range(rankings.shape[1]):
+			if in_batch:
 
-					if k!=j:
-						negative = np.random.choice(rankings[:, k])
-						negative_list.append(negative)
+				data_line = [anchor, positive]
 
-			data_line = [anchor] + [positive] + negative_list #[anchor, postive, negative, negative....]
+			else:
+				negative_list = []
+				while len(negative_list) < negative_numbers:
+					for k in range(rankings.shape[1]):
+
+						if k!=j:
+							negative = np.random.choice(rankings[:, k])
+							negative_list.append(negative)
+
+				data_line = [anchor] + [positive] + negative_list #[anchor, postive, negative, negative....]
 
 			data.append(data_line)
 

@@ -1,67 +1,19 @@
 import torch
-import torch.nn as nn
-from torch.nn.parameter import Parameter
-import argparse
 import os
 import random
 from tqdm import tqdm
 import numpy as np
-import spacy
 import json
 import pickle
 from multiprocessing import Pool
 from collections import defaultdict, Counter
-from transformers import LukeTokenizer, LukeModel, AdamW, BertTokenizer, BertModel
-#from sentence_transformers import SentenceTransformer
-from clustering.utils import get_rankings, set_logger, update_logger
-from clustering.kmeans import get_kmeans, get_metric, get_kmeans_score
+from clustering.utils import get_rankings
+from clustering.kmeans import get_kmeans, get_kmeans_score
 from topic_modeling.dataloader import get_train_loader
 from clustering.trainer import ClusterLearner
 from topic_modeling.consts import TOKENIZER, NLP, ARGS, DEVICE
 from topic_modeling.utils import read_data, get_features, get_probs
 from uctopic.models import UCTopicConfig, UCTopicCluster
-
-
-# def get_glove_features(data, label_dict):
-
-#     all_features = []
-#     all_labels = []
-
-#     word_feature_dict = dict()
-#     with open('glove.6B.300d.txt') as f:
-#         for line in tqdm(f, desc='Reading Glove.', ncols=100):
-#             line = line.strip().split(' ')
-#             assert len(line) == 301
-#             word_feature_dict[line[0]] = np.array([float(number) for number in line[1:]])
-#     total = 0
-#     zero = 0
-#     for batch in tqdm(data, ncols=100, desc='Generate all features...'):
-
-#         sentence, spans, ner_labels = batch
-
-#         for span, label in zip(spans, ner_labels):
-#             if label in label_dict:
-#                 all_labels.append(label_dict[label])
-#             else:
-#                 continue
-
-#             total += 1
-#             start, end = span
-#             phrase_tokens = [token.lower() for token in sentence[start:end+1]]
-#             phrase_repr = [word_feature_dict[token] for token in phrase_tokens if token in word_feature_dict]
-#             if len(phrase_repr)==0:
-#                 phrase_repr=np.zeros(300)
-#                 zero += 1
-#             else:
-#                 phrase_repr = np.array(phrase_repr).mean(axis=0)
-#             assert phrase_repr.shape[0] == 300
-#             all_features.append(phrase_repr)
-            
-#     print(zero/total)
-#     all_features = torch.FloatTensor(all_features)
-#     all_labels = torch.LongTensor(all_labels)
-
-#     return all_features, all_labels
 
 class NounPhraser:
     @staticmethod
@@ -124,28 +76,6 @@ class NounPhraser:
 
         return phrases
 
-# def get_features(sentence_dict, phrase_list_sampled, model):
-
-#     all_features = []
-#     with torch.no_grad():
-
-#         for batch in tqdm(batchify(sentence_dict, phrase_list_sampled, ARGS.batch_size), ncols=100, desc='Generate all features...'):
-
-#             text_batch, span_batch = batch
-            
-#             inputs = TOKENIZER(text_batch, entity_spans=span_batch, padding=True, add_prefix_space=True, return_tensors="pt")
-
-#             for k,v in inputs.items():
-#                 inputs[k] = v.to(DEVICE)
-
-#             luke_outputs, entity_pooling = model(**inputs)
-            
-#             all_features.append(entity_pooling.squeeze().detach().cpu())
-
-#     all_features = torch.cat(all_features, dim=0)
-
-#     return all_features
-
 def main():
 
     config = UCTopicConfig.from_pretrained("studio-ousia/luke-base")
@@ -174,7 +104,6 @@ def main():
     kmeans_scores = sorted(kmeans_scores, key=lambda x: x[1], reverse=True)
     num_class = kmeans_scores[0][0]
     print('We select the number of topics: ', num_class)
-    #num_class = 22
 
     ## To finetune, we randomly sample part of phrases
     phrase_list_sampled = random.sample(phrase_list, min(ARGS.sample_num_finetune, len(phrase_list)))    
@@ -205,7 +134,6 @@ def main():
     print(optimizer)
 
     # set up logger
-    #logger = set_logger(ARGS.save_path)
     global_step = 0
     # set up the trainer
     learner = ClusterLearner(model, optimizer)
@@ -225,8 +153,6 @@ def main():
                 'Epoch{}, Global Step {}, CL-loss {:.5f}'.format(
                     epoch, global_step,  loss['Instance-CL_loss']
                     ))
-
-            #update_logger(logger, loss, global_step)
             global_step+=1
             if global_step >= ARGS.finetune_step:
                 ret = True

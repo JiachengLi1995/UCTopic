@@ -1,7 +1,6 @@
 #%%
 import torch
-from tqdm import tqdm
-from transformers import LukeTokenizer, LukeModel, LukeConfig
+from transformers import LukeModel, LukeConfig
 from uctopic.models import UCTopic
 #%%
 model = LukeModel.from_pretrained("studio-ousia/luke-base")

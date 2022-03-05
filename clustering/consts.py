@@ -10,7 +10,7 @@ def get_device(gpu):
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--gpu", type=str, default=None)
-    parser.add_argument("--data_path", type=str, default='data/wnut2017/all_data.json')
+    parser.add_argument("--data_path", type=str, default='data/conll2003/all_data.json')
     parser.add_argument("--save_path", type=str, default='clustering_results/')
     parser.add_argument("--num_classes", type=int, default=2)
     parser.add_argument("--max_training_examples", type=int, default=100000)
@@ -26,6 +26,7 @@ def parse_args():
     parser.add_argument("--temp", type=float, default=0.05)
     parser.add_argument('--alpha', type=float, default=1.0)
     parser.add_argument('--use_perturbation', action='store_true', help="")
+    parser.add_argument("--in_batch", action='store_true')
     args = parser.parse_args()
     return args
 

@@ -85,35 +85,15 @@ class Similarity(nn.Module):
     def forward(self, x, y):
         return self.cos(x, y) / self.temp
 
-# def cl_init(cls, config):
-#     """
-#     Contrastive learning class init function.
-#     """
-#     cls.mlp = MLPLayer(config)
-#     cls.sim = Similarity(temp=cls.model_args.temp)
-#     # cls.init_weights()  
-
 class UCTopicModel(LukePreTrainedModel):
-    #_keys_to_ignore_on_load_missing = [r"position_ids"]
-
     def __init__(self, model_args, luke_config):
         super().__init__(luke_config)
         self.model_args = model_args
         self.model_name = model_args.model_name_or_path
         self.luke = LukeModel.from_pretrained(self.model_name)
         self.luke_config = luke_config
-        #self.luke_config = LukeConfig.from_pretrained(self.model_name)
         self.lm_head = RobertaLMHead(self.luke_config)
-        # if 'base' in self.model_name:
-        #     lm_ckpt = torch.load('./luke_lmhead/luke_base_lmhead.bin')
-        # else:
-        #     lm_ckpt = torch.load('./luke_lmhead/luke_large_lmhead.bin')
 
-        # lm_model_state = self.lm_head.state_dict()
-        # for name, param in lm_ckpt.items():
-        #     if name.startswith('lm_head.'):
-        #         name = name[len('lm_head.'):]
-        #     lm_model_state[name].copy_(param)
         self.mlp = MLPLayer(self.luke_config)
         self.sim = Similarity(temp=self.model_args.temp)
 
@@ -402,28 +382,8 @@ class UCTopicCluster(nn.Module):
         return loss
 
     def get_cluster_prob(self, embeddings, metric='l2'):
-        # if metric == 'l2':
-        #     dist = torch.sum((embeddings.unsqueeze(1) - self.cluster_centers) ** 2, 2)
-        # else:
-        #     cos = nn.CosineSimilarity(dim=-1)
-        #     dist = 1 - cos(embeddings.unsqueeze(1), self.cluster_centers.unsqueeze(0))
-        # numerator = 1.0 / (1.0 + (dist / self.alpha))
-        # power = float(self.alpha + 1) / 2
-        # numerator = numerator ** power
-        # return numerator / torch.sum(numerator, dim=1, keepdim=True)
-
         cos = self.sim(embeddings.unsqueeze(1), self.cluster_centers.unsqueeze(0))
         return self.softmax(cos)
-
-    def local_consistency(self, embd0, embd1, embd2, criterion):
-        p0 = self.get_cluster_prob(embd0)
-        p1 = self.get_cluster_prob(embd1)
-        p2 = self.get_cluster_prob(embd2)
-        
-        lds1 = criterion(p1, p0)
-        lds2 = criterion(p2, p0)
-
-        return lds1+lds2
 
     def update_cluster_centers(self, cluster_centers):
         

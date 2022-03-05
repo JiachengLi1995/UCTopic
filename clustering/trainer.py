@@ -48,22 +48,8 @@ class ClusterLearner(nn.Module):
 		# Instance-CL loss
 		contrastive_loss = self.model.get_cl_loss(anchor_embd, cl_embd)
 		loss = contrastive_loss
-
-        # clustering loss
-		# output = self.model.get_cluster_prob(embd0)
-		# target = target_distribution(output).detach()
-		# cluster_loss = self.cluster_loss((output+1e-08).log(),target)/output.shape[0]
-		# loss = cluster_loss
-
-		# consistency loss (this loss is used in the experiments of our NAACL paper, we included it here just in case it might be helpful for your specific applications)
-		
-		# local_consloss_val = 0
-		# if use_perturbation:
-		# 	local_consloss = self.model.local_consistency(embd0, embd1, embd2, self.kcl)
-		# 	loss *= local_consloss
-		# 	local_consloss_val = local_consloss.detach().cpu().item()
 				
 		loss.backward()
 		self.optimizer.step()
 		self.optimizer.zero_grad()
-		return {"Instance-CL_loss":contrastive_loss.detach().cpu().item(), "clustering_loss":0, "local_consistency_loss":0}
+		return {"Instance-CL_loss":contrastive_loss.detach().cpu().item()}

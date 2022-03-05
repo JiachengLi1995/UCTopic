@@ -1,20 +1,16 @@
 #!/bin/bash
 
-# In this example, we show how to train SimCSE using multiple GPU cards and PyTorch's distributed data parallel on supervised NLI dataset.
 # Set how many GPUs to use
-
 NUM_GPU=2
 # Allow multiple threads
 export OMP_NUM_THREADS=8
 
 # Use distributed data parallel
 # If you only want to use one card, uncomment the following line and comment the line with "torch.distributed.launch"
-#CUDA_VISIBLE_DEVICES=4,5 python -m torch.distributed.launch --nproc_per_node $NUM_GPU train.py \
-#CUDA_VISIBLE_DEVICES=4 python train.py \
-CUDA_VISIBLE_DEVICES=4,5 python -m torch.distributed.launch --nproc_per_node $NUM_GPU train.py \
+CUDA_VISIBLE_DEVICES=4,5 python -m torch.distributed.launch --nproc_per_node $NUM_GPU pretrain.py \
     --model_name_or_path studio-ousia/luke-base \
     --train_file data/wiki_contrastive_entity_1m.json \
-    --output_dir result/uctopic_base_3 \
+    --output_dir result/uctopic_base \
     --num_train_epochs 1 \
     --preprocessing_num_workers 1 \
     --dataloader_num_workers 2  \
