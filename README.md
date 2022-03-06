@@ -119,13 +119,14 @@ For unsupervised pretraining of UCTopic, we use article and span with links from
 
 We provide example training scripts and our default training parameters for unsupervised training of UCTopic in `run_example.sh`.
 
-'''bash
+```bash
 bash run_example.sh
-'''
+```
 
 Arguments description can be found in `pretrain.py`. All the other arguments are standard Huggingface's `transformers` training arguments.
 
 **Convert models**
+
 Our pretrained checkpoints are slightly different from the checkpoint `uctopic-base`. Please refer `convert_uctopic_parameters.py` to convert it.
 
 ## Contact
