@@ -10,12 +10,10 @@ from uctopic.tokenizer import UCTopicTokenizer
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--gpu", type=int, default=None)
-    parser.add_argument("--data_path", type=str, default='data/mitmovie/')
+    parser.add_argument("--data_path", type=str, default='data/conll2003/')
     parser.add_argument("--num_classes", type=int, default=3)
-    parser.add_argument("--use_luke", action='store_true')
     parser.add_argument("--epoch", type=int, default=10)
     parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--output_size", type=int, default=64)
     parser.add_argument("--learning_rate", type=float, default=2e-5)
     parser.add_argument("--temp", type=float, default=0.05)
     parser.add_argument("--negative_numbers", type=int, default=10)
@@ -43,10 +41,8 @@ def get_features(data, tokenizer, model):
                 inputs[k] = v.to(DEVICE)
 
             luke_outputs, entity_pooling = model(**inputs)
-            if ARGS.use_luke:
-                all_features.append(luke_outputs.entity_last_hidden_state.squeeze().detach().cpu())
-            else:
-                all_features.append(entity_pooling.squeeze().detach().cpu())
+            
+            all_features.append(entity_pooling.squeeze().detach().cpu())
 
             all_labels += label_batch
 
@@ -57,10 +53,8 @@ def get_features(data, tokenizer, model):
 
 def main():
 
-    config = UCTopicConfig.from_pretrained("studio-ousia/luke-base")
-    tokenizer = UCTopicTokenizer.from_pretrained("studio-ousia/luke-base")
-    model = UCTopic(config)
-    model.load_state_dict(torch.load('result/pytorch_model.bin'))
+    tokenizer = UCTopicTokenizer.from_pretrained("uctopic-base")
+    model = UCTopic.from_pretrained("uctopic-base")
     model.to(DEVICE)
     model.eval()
 

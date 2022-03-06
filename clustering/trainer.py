@@ -36,10 +36,8 @@ class ClusterLearner(nn.Module):
 		super(ClusterLearner, self).__init__()
 		self.model = model
 		self.optimizer = optimizer
-		self.cluster_loss = nn.KLDivLoss(reduction='sum')
-		self.kcl = KCL()
 
-	def forward(self, inputs, use_perturbation=False):
+	def forward(self, inputs):
 		anchor_batch, cl_batch = inputs
 		
 		_, anchor_embd = self.model(**anchor_batch)  #anchor

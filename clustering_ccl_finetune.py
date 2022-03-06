@@ -3,7 +3,7 @@ import numpy as np
 import random
 from tqdm import tqdm
 from collections import defaultdict, Counter
-from uctopic.models import UCTopicCluster, UCTopicConfig
+from uctopic.models import UCTopicCluster
 from clustering.trainer import ClusterLearner
 from clustering.kmeans import get_kmeans
 from clustering.dataloader import get_train_loader
@@ -37,9 +37,7 @@ def main():
 
     ARGS.num_classes = len(label_dict)
 
-    config = UCTopicConfig.from_pretrained("studio-ousia/luke-base")
-    model = UCTopicCluster(config, ARGS)
-    model.load_state_dict(torch.load('result/pytorch_model.bin'), strict= False)
+    model = UCTopicCluster.from_pretrained("uctopic-base")
     model.to(DEVICE)
     model.eval()
     
@@ -78,13 +76,13 @@ def main():
     learner = ClusterLearner(model, optimizer)
     model.train()
     for epoch in range(ARGS.epoch):
-        tqdm_dataloader = tqdm(train_loader, ncols=150)
+        tqdm_dataloader = tqdm(train_loader, ncols=100)
         for features in tqdm_dataloader:
 
             for feature in features:
                 for k, v in feature.items():
                     feature[k] = v.to(DEVICE)
-            loss = learner.forward(features, use_perturbation=ARGS.use_perturbation)
+            loss = learner.forward(features)
 
             tqdm_dataloader.set_description(
                 'Epoch{}, Global Step {}, CL-loss {:.5f}'.format(

@@ -2,7 +2,7 @@ import os
 import torch
 import spacy
 import argparse
-from transformers import AutoTokenizer
+from . import UCTopicTokenizer
 from nltk import WordNetLemmatizer
 
 
@@ -13,9 +13,9 @@ def parse_args():
 	parser = argparse.ArgumentParser()
 	parser.add_argument("--gpu", type=int, default=None)
 	parser.add_argument("--data_path", type=str, default='data/topic_data/')
-	parser.add_argument("--dataset", type=str, default='citysearch')
+	parser.add_argument("--dataset", type=str, default='google_restaurant')
 	parser.add_argument("--save_path", type=str, default='topic_results')
-	parser.add_argument("--num_classes", type=str, default='[3, 15]', help='Min and Max number of classes.')
+	parser.add_argument("--num_classes", type=str, default='[10, 15]', help='Min and Max number of classes.')
 	parser.add_argument("--sample_num_cluster", type=int, default=10000)
 	parser.add_argument("--sample_num_finetune", type=int, default=100000)
 	parser.add_argument("--contrastive_num", type=int, default=10)
@@ -37,7 +37,7 @@ DEVICE = get_device(ARGS.gpu)
 def get_device(gpu):
 	return torch.device('cpu' if gpu is None else f'cuda:{gpu}')
 
-TOKENIZER = AutoTokenizer.from_pretrained('studio-ousia/luke-base')
+TOKENIZER = UCTopicTokenizer.from_pretrained('studio-ousia/luke-base')
 LEMMATIZER = WordNetLemmatizer()
 NLP = spacy.load('en_core_web_sm', disable=['ner'])
 

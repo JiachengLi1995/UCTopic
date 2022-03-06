@@ -7,7 +7,7 @@ from torch.nn import Parameter
 from transformers.models.roberta.modeling_roberta import RobertaLMHead
 from transformers.models.luke.modeling_luke import LukePreTrainedModel
 from transformers import LukeConfig, LukeModel
-
+from transformers.modeling_utils import PreTrainedModel
 class UCTopicConfig(LukeConfig):
 
     def __init__(
@@ -31,6 +31,8 @@ class UCTopicConfig(LukeConfig):
         pad_token_id=1,
         bos_token_id=0,
         eos_token_id=2,
+        alpha=1.0,
+        temp=0.05,
         **kwargs
     ):
         super().__init__(
@@ -55,6 +57,9 @@ class UCTopicConfig(LukeConfig):
             eos_token_id,
             **kwargs
         )
+        # for contrastive learning
+        self.alpha = alpha
+        self.temp = temp
 
 class MLPLayer(nn.Module):
     """
@@ -276,9 +281,10 @@ class UCTopicModel(LukePreTrainedModel):
         return outputs
 
 
-class UCTopic(nn.Module):
+class UCTopic(PreTrainedModel):
+    config_class = UCTopicConfig
     def __init__(self, config):
-        super().__init__()
+        super().__init__(config)
         self.luke = LukeModel(config)
         self.config = config
         self.mlp = MLPLayer(self.config)
@@ -315,14 +321,15 @@ class UCTopic(nn.Module):
         entity_pooler = self.mlp(entity_pooler)
         return outputs, entity_pooler.squeeze()
 
-class UCTopicCluster(nn.Module):
-    def __init__(self, config, model_args, cluster_centers=None):
-        super().__init__()
+class UCTopicCluster(PreTrainedModel):
+    config_class = UCTopicConfig
+    def __init__(self, config, cluster_centers=None):
+        super().__init__(config)
         self.luke = LukeModel(config)
         self.config = config
         self.mlp = MLPLayer(self.config)
-        self.alpha = model_args.alpha
-        self.sim = Similarity(temp=model_args.temp)
+        self.alpha = self.config.alpha
+        self.sim = Similarity(temp=self.config.temp)
         self.softmax = nn.Softmax(dim=-1)
         # Instance-CL head
         

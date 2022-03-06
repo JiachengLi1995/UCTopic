@@ -11,9 +11,9 @@ from clustering.utils import get_rankings
 from clustering.kmeans import get_kmeans, get_kmeans_score
 from topic_modeling.dataloader import get_train_loader
 from clustering.trainer import ClusterLearner
-from topic_modeling.consts import TOKENIZER, NLP, ARGS, DEVICE
+from topic_modeling.consts import NLP, ARGS, DEVICE
 from topic_modeling.utils import read_data, get_features, get_probs
-from uctopic.models import UCTopicConfig, UCTopicCluster
+from uctopic.models import UCTopicCluster
 
 class NounPhraser:
     @staticmethod
@@ -78,9 +78,7 @@ class NounPhraser:
 
 def main():
 
-    config = UCTopicConfig.from_pretrained("studio-ousia/luke-base")
-    model = UCTopicCluster(config, ARGS)
-    model.load_state_dict(torch.load('result/pytorch_model.bin'), strict= False)
+    model = UCTopicCluster.from_pretrained('uctopic-base')
     model.to(DEVICE)
     model.eval()
 
@@ -93,7 +91,6 @@ def main():
     # To make sure the number of topics, we randomly sample part of phrases first
     phrase_list_sampled = random.sample(phrase_list, min(ARGS.sample_num_cluster, len(phrase_list)))    
     features = get_features(sentence_dict, phrase_list_sampled, model)
-    #features, labels = get_phrase_bert_features(data)
 
     kmeans_scores = []
     for num_class in range(ARGS.num_classes[0], ARGS.num_classes[1]+1):
@@ -163,7 +160,6 @@ def main():
     model.eval()
 
     all_prob = get_probs(sentence_dict, phrase_list, model)
-    #all_embeddings, all_prob = get_features(sentence_dict, phrase_list, model, return_prob=True)
     all_pred = all_prob.max(1)[1].tolist()
     all_prob = all_prob.numpy()
 
@@ -191,6 +187,8 @@ def main():
 
 
     results_path = os.path.join(ARGS.save_path, ARGS.dataset)
+    if not os.path.exists(ARGS.save_path):
+        os.mkdir(ARGS.save_path)
     if not os.path.exists(results_path):
         os.mkdir(results_path)
 
