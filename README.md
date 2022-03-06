@@ -12,14 +12,15 @@ We continue completing the following sections:
 ## Quick Links
 
   - [Overview](#overview)
-  - [Getting Started](#getting-started)
-  - [Model List](#model-list)
-  - [Use SimCSE with Huggingface](#use-simcse-with-huggingface)
-  - [Train SimCSE](#train-simcse)
+  - [Pretrained Model](#pretrained-model)
+  - [Get Phrase Embeddings](#get-phrase-embeddings)
+  - [Experiments](#experiments)
     - [Requirements](#requirements)
-    - [Evaluation](#evaluation)
-    - [Training](#training)
-  - [Bugs or Questions?](#bugs-or-questions)
+    - [Datasets](#datasets)
+    - [Entity Clustering](#entity-clustering)
+    - [Topic Mining](#topic-mining)
+  - [Pretraining](#pretraining)
+  - [Contact](#contact)
   - [Citation](#citation)
 
 ## Overview
