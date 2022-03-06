@@ -1,7 +1,0 @@
-{
-    "python.pythonPath": "/home/jiacheng/anaconda3/envs/UCPhrase/bin/python",
-    "python.analysis.extraPaths": [
-        "./clustering",
-        "./clustering"
-    ]
-}
