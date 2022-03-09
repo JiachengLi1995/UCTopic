@@ -7,7 +7,6 @@ from torch.nn import Parameter
 from transformers.models.roberta.modeling_roberta import RobertaLMHead
 from transformers.models.luke.modeling_luke import LukePreTrainedModel
 from transformers import LukeConfig, LukeModel
-from transformers.modeling_utils import PreTrainedModel
 class UCTopicConfig(LukeConfig):
 
     def __init__(
@@ -281,7 +280,7 @@ class UCTopicModel(LukePreTrainedModel):
         return outputs
 
 
-class UCTopic(PreTrainedModel):
+class UCTopic(LukePreTrainedModel):
     config_class = UCTopicConfig
     def __init__(self, config):
         super().__init__(config)
@@ -321,7 +320,7 @@ class UCTopic(PreTrainedModel):
         entity_pooler = self.mlp(entity_pooler)
         return outputs, entity_pooler.squeeze()
 
-class UCTopicCluster(PreTrainedModel):
+class UCTopicCluster(LukePreTrainedModel):
     config_class = UCTopicConfig
     def __init__(self, config, cluster_centers=None):
         super().__init__(config)

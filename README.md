@@ -5,7 +5,6 @@ This repository contains the code and pre-trained models for our paper [UCTopic:
 ## To-Do:
 We continue completing the following sections:
 
- * Using UCTopic with PyPI
  * Get Topical Phrases
 
 
@@ -13,7 +12,8 @@ We continue completing the following sections:
 
   - [Overview](#overview)
   - [Pretrained Model](#pretrained-model)
-  - [Get Phrase Embeddings](#get-phrase-embeddings)
+  - [Getting Started](#getting-started)
+    - [Get Phrase Embeddings](#get-phrase-embeddings)
   - [Experiments](#experiments)
     - [Requirements](#requirements)
     - [Datasets](#datasets)
@@ -35,13 +35,27 @@ Our released model:
 
 Unzip to get `uctopic-base` folder.
 
-## Get Phrase Embeddings
-We downloaded the dependencies of UCTopic from HuggingFace's `transformers`, so you can get phrase embeddings after installing [Pytorch](https://pytorch.org/). Basically, our model inputs are same as [LUKE](https://huggingface.co/docs/transformers/model_doc/luke). Note: please input only <strong>ONE</strong> span each time, otherwise, will have performance decay according to our empirical results.
+## Getting Started
+We provide an easy-to-use sentence embedding tool based on our UCTopic model. To use the tool, first install the uctopic package from PyPI
+```bash
+pip install uctopic
+```
+Or directly install it from our code
+```bash
+python setup.py install
+```
+After installing the package, you can load our model by just two lines of code
+```python
+from uctopic import UCTopic
+model = UCTopic.from_pretrained('uctopic-base') # Path to the pretrained model
+```
+### Get Phrase Embeddings
+Basically, our model inputs are same as [LUKE](https://huggingface.co/docs/transformers/model_doc/luke). Note: please input only <strong>ONE</strong> span each time, otherwise, will have performance decay according to our empirical results.
 
 ```python
 from uctopic import UCTopicTokenizer, UCTopic
 
-tokenizer = UCTopicTokenizer.from_pretrained('uctopic-base') # Path to your uctopic-base folder
+tokenizer = UCTopicTokenizer.from_pretrained('uctopic-base') # Path to the pretrained model
 model = UCTopic.from_pretrained('uctopic-base')
 
 text = "Beyoncé lives in Los Angeles."
