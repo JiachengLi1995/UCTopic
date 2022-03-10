@@ -36,7 +36,7 @@ Our released model:
 Unzip to get `uctopic-base` folder.
 
 ## Getting Started
-We provide an easy-to-use sentence embedding tool based on our UCTopic model. To use the tool, first install the uctopic package from PyPI
+We provide an easy-to-use phrase representation tool based on our UCTopic model. To use the tool, first install the uctopic package from PyPI
 ```bash
 pip install uctopic
 ```
