@@ -47,16 +47,18 @@ python setup.py install
 After installing the package, you can load our model by just two lines of code
 ```python
 from uctopic import UCTopic
-model = UCTopic.from_pretrained('uctopic-base') # Path to the pretrained model
+model = UCTopic.from_pretrained('JiachengLi/uctopic-base')
 ```
+The model will automatically download pre-trained parameters from [HuggingFace's models](https://huggingface.co/models). If you encounter any problem when directly loading the models by HuggingFace's API, you can also download the models manually from the above table and use `model = UCTopic.from_pretrained({PATH TO THE DOWNLOAD MODEL})`.
+
 ### Get Phrase Embeddings
 Basically, our model inputs are same as [LUKE](https://huggingface.co/docs/transformers/model_doc/luke). Note: please input only <strong>ONE</strong> span each time, otherwise, will have performance decay according to our empirical results.
 
 ```python
 from uctopic import UCTopicTokenizer, UCTopic
 
-tokenizer = UCTopicTokenizer.from_pretrained('uctopic-base') # Path to the pretrained model
-model = UCTopic.from_pretrained('uctopic-base')
+tokenizer = UCTopicTokenizer.from_pretrained('JiachengLi/uctopic-base')
+model = UCTopic.from_pretrained('JiachengLi/uctopic-base')
 
 text = "Beyoncé lives in Los Angeles."
 entity_spans = [(17, 28)] # character-based entity span corresponding to "Los Angeles"
