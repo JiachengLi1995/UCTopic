@@ -9,8 +9,9 @@ Our ACL 2022 paper [UCTopic: Unsupervised Contrastive Learning for Phrase Repres
   - [Overview](#overview)
   - [Pretrained Model](#pretrained-model)
   - [Getting Started](#getting-started)
-    - [Get Phrase Embeddings](#get-phrase-embeddings)
-  - [Experiments](#experiments)
+    - [UCTopic Model](#uctopic-model)
+    - [UCTopicTool](#uctopictool)
+  - [Experiments in Paper](#experiments)
     - [Requirements](#requirements)
     - [Datasets](#datasets)
     - [Entity Clustering](#entity-clustering)
@@ -41,7 +42,7 @@ Or directly install it from our code
 python setup.py install
 ```
 
-## UCTopic
+## UCTopic Model
 After installing the package, you can load our model by just two lines of code
 ```python
 from uctopic import UCTopic

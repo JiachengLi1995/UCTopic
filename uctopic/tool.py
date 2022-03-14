@@ -368,37 +368,37 @@ class UCTopicTool(object):
 
         return output_data, topic_phrase_dict
 
-if __name__=="__main__":
+# if __name__=="__main__":
 
 
-    model_name = 'JiachengLi/uctopic-base'
-    ## Encoding test
-    phrases = [
-        ["We came for a birthday brunch and this place is so much bigger than it looks from the outside!", (3, 7)],
-        ["It was totally packed and loud.", (15, 21)],
-        ["Service was on the slower side.", (0, 7)],
-        ["I ordered 2 mojitos: 1 lime and 1 mango.", (12, 19)],
-        ["The ingredient weren\u2019t really fresh.", (4, 14)]
-    ]
+#     model_name = 'JiachengLi/uctopic-base'
+#     ## Encoding test
+#     phrases = [
+#         ["We came for a birthday brunch and this place is so much bigger than it looks from the outside!", (3, 7)],
+#         ["It was totally packed and loud.", (15, 21)],
+#         ["Service was on the slower side.", (0, 7)],
+#         ["I ordered 2 mojitos: 1 lime and 1 mango.", (12, 19)],
+#         ["The ingredient weren\u2019t really fresh.", (4, 14)]
+#     ]
 
-    tool = UCTopicTool(model_name, device='cuda:5')
-    # embeddings = tool.encode(phrases, keepdim=False)
-    # print(embeddings.shape)
+#     tool = UCTopicTool(model_name, device='cuda:5')
+#     # embeddings = tool.encode(phrases, keepdim=False)
+#     # print(embeddings.shape)
     
     
-    import json
-    sentences = []
-    with open('data/topic_data/google_restaurant.json') as f:
-        for line in f:
-            line = json.loads(line)
-            sentences.append(line["text"])
+#     import json
+#     sentences = []
+#     with open('data/topic_data/google_restaurant.json') as f:
+#         for line in f:
+#             line = json.loads(line)
+#             sentences.append(line["text"])
 
-    sentences = sentences[:100000]
+#     sentences = sentences[:100000]
 
-    output_data, topic_phrase_dict = tool.topic_mining(sentences, n_clusters=[18, 28], ccl_finetune=True, n_workers=8, n_sampling=10000, batch_size_finetune=4, finetune_step=1000)
+#     output_data, topic_phrase_dict = tool.topic_mining(sentences, n_clusters=[18, 28], ccl_finetune=True, n_workers=8, n_sampling=10000, batch_size_finetune=4, finetune_step=1000)
 
-    with open('tocal_phrase_1.json', 'w') as fout:
+#     with open('tocal_phrase_1.json', 'w') as fout:
 
-        json.dump(topic_phrase_dict, fout)
+#         json.dump(topic_phrase_dict, fout)
 
-    print(output_data[:20])
+#     print(output_data[:20])
