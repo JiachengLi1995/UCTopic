@@ -8,7 +8,7 @@ import torch.utils.data as util_data
 from itertools import combinations
 from torch.utils.data import Dataset
 from multiprocessing import Pool
-from tokenizer import UCTopicTokenizer
+from .tokenizer import UCTopicTokenizer
 
 
 TOKENIZER = None
@@ -43,7 +43,7 @@ class ContrastClusteringDataset(Dataset):
         
         pool = Pool(processes=num_workers)
         pool_func = pool.imap(func=ContrastClusteringDataset._par_tokenize_doc, iterable=data)
-        doc_tuples = list(tqdm(pool_func, total=len(data), ncols=100, desc=f'[Tokenize]'))
+        doc_tuples = list(tqdm(pool_func, total=len(data), desc=f'[Tokenize]'))
         self.tokenized_corpus = [tokenized_sent for tokenized_sent, entity_ids in doc_tuples]
         doc_entity_list = [entity_ids for tokenized_sent, entity_ids in doc_tuples]
         pool.close()
@@ -51,7 +51,7 @@ class ContrastClusteringDataset(Dataset):
 
         self.label_instance_dict = collections.defaultdict(list)
         entity_position_dict = collections.defaultdict(list)
-        for sent_idx, sent_entity_list in tqdm(enumerate(doc_entity_list), ncols=100, desc='Extract entity positions'):
+        for sent_idx, sent_entity_list in tqdm(enumerate(doc_entity_list), desc='Extract entity positions'):
             for entity_idx, entity in enumerate(sent_entity_list):
 
                 if entity in pseudo_label_dict:
@@ -67,7 +67,7 @@ class ContrastClusteringDataset(Dataset):
 
         pool = Pool(processes=num_workers)
         pool_func = pool.imap(func=ContrastClusteringDataset._par_sample_pairs, iterable=entity_position_filter_dict.values())
-        pair_tuples = list(tqdm(pool_func, total=len(entity_position_filter_dict), ncols=100, desc=f'Pairing....'))
+        pair_tuples = list(tqdm(pool_func, total=len(entity_position_filter_dict), desc=f'Pairing....'))
         self.entity_pairs = []
         for sent_entity_pairs in pair_tuples:
             self.entity_pairs += sent_entity_pairs

@@ -1,7 +1,9 @@
 import math
 import torch
+import torch.nn.functional as F
 from time import time
 import numpy as np
+from tqdm import tqdm
 from sklearn.metrics import silhouette_score
 
 class KMeans:
@@ -75,7 +77,7 @@ class KMeans:
             remaining = torch.cuda.memory_allocated()
         return remaining
 
-    def max_sim(self, a, b):
+    def max_sim(self, a, b, return_sim=False):
         """
         Compute maximum similarity (or minimum distance) of each vector
         in a with all of the vectors in b
@@ -93,7 +95,10 @@ class KMeans:
         if device == 'cpu':
             sim = sim_func(a, b)
             max_sim_v, max_sim_i = sim.max(dim=-1)
-            return max_sim_v, max_sim_i, sim
+            if return_sim:
+                return max_sim_v, max_sim_i, sim
+            else:
+                return max_sim_v, max_sim_i
         else:
             if a.dtype == torch.float:
                 expected = a.shape[0] * a.shape[1] * b.shape[0] * 4
@@ -108,16 +113,26 @@ class KMeans:
                 sub_x = a[i*subbatch_size: (i+1)*subbatch_size]
                 sub_sim = sim_func(sub_x, b)
                 sub_max_sim_v, sub_max_sim_i = sub_sim.max(dim=-1)
-                sim.append(sub_sim.cpu())
+                if return_sim:
+                    sim.append(sub_sim.cpu())
+                else:
+                    del sim
                 msv.append(sub_max_sim_v)
                 msi.append(sub_max_sim_i)
             if ratio == 1:
-                max_sim_v, max_sim_i, sim = msv[0], msi[0], sim[0]
+                max_sim_v, max_sim_i = msv[0], msi[0]
+                if return_sim:
+                    sim = sim[0]
             else:
                 max_sim_v = torch.cat(msv, dim=0)
                 max_sim_i = torch.cat(msi, dim=0)
-                sim = torch.cat(sim, dim=0)
-            return max_sim_v, max_sim_i, sim
+                if return_sim:
+                    sim = torch.cat(sim, dim=0)
+
+            if return_sim:
+                return max_sim_v, max_sim_i, sim
+            else:
+                return max_sim_v, max_sim_i
 
     def fit_predict(self, X, centroids=None, verbose=0):
         """
@@ -140,7 +155,12 @@ class KMeans:
             self.centroids = centroids
         num_points_in_clusters = torch.ones(self.n_clusters, device=device)
         closest = None
-        for i in range(self.max_iter):
+
+        if verbose > 0:
+            tqdm_iter = tqdm(range(self.max_iter), desc='Clustering')
+        else:
+            tqdm_iter = range(self.max_iter)
+        for i in tqdm_iter:
             iter_time = time()
             if self.minibatch is not None:
                 x = X[np.random.choice(batch_size, size=[self.minibatch], replace=False)]
@@ -176,9 +196,9 @@ class KMeans:
 
             self.centroids = self.centroids * (1-lr) + c_grad * lr
 
-        _, closest, scores = self.max_sim(a=X, b=self.centroids)
+        _, closest, scores = self.max_sim(a=X, b=self.centroids, return_sim=True)
         
-        return closest, scores
+        return closest, F.softmax(scores, dim=-1)
 
     def predict(self, X):
         """
@@ -205,4 +225,11 @@ def get_silhouette_score(features: torch.Tensor, n_clusters: int, max_iter: int=
     labels, kmeans_scores = kmeans.fit_predict(features)
     s_score = silhouette_score(features.cpu().numpy(), labels.numpy())
     return s_score, kmeans_scores, kmeans.centroids.cpu().numpy()
+
+def get_kmeans(features: torch.Tensor, n_clusters: int, max_iter: int=300, verbose: int=1):
+
+    kmeans = KMeans(n_clusters=n_clusters, max_iter=max_iter)
+    labels, kmeans_scores = kmeans.fit_predict(features, verbose=verbose)
+
+    return kmeans_scores, kmeans.centroids.cpu().numpy()
 

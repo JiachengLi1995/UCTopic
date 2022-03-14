@@ -6,10 +6,9 @@ from torch import Tensor
 import numpy as np
 from numpy import ndarray
 from collections import defaultdict, Counter
-from models import UCTopicCluster
-from tokenizer import UCTopicTokenizer
+from .models import UCTopicCluster
+from .tokenizer import UCTopicTokenizer
 from typing import List, Dict, Tuple, Type, Union
-from kmeans import get_silhouette_score
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s', datefmt='%m/%d/%Y %H:%M:%S',
                     level=logging.INFO)
@@ -161,8 +160,8 @@ class UCTopicTool(object):
                         finetune_step: int = 2000,
                         contrastive_num: int = 5,
                         positive_ratio: float = 0.1,
-                        n_sampling: int = -1,
-                        n_workers: int = 4
+                        n_sampling: int = 10000,
+                        n_workers: int = 8
                         ):
 
         '''
@@ -187,21 +186,22 @@ class UCTopicTool(object):
         n_workers: The number of works for preprocessing data.
         '''
 
+        from .kmeans import get_silhouette_score, get_kmeans
+        from .utils import NounPhraser, Lemmatizer, get_rankings
+        from .dataloader import get_train_loader
+        from .trainer import ClusterLearner
+
         assert metric in ["cosine", "euclidean"], "metric should be \"cosine\" or \"euclidean\""
 
         sentences, spans = self._check_data(sentences, spans)
 
         if spans is None:
             logger.info("Phrase mining from spaCy.")
-            from utils import NounPhraser
-
             sentence_dict, phrase_list = NounPhraser.process_data(sentences, num_workers=n_workers)
 
         else:
 
             assert len(sentences) == len(spans), "Sentences and spans do not have the same length."
-            from utils import Lemmatizer
-
             sentence_dict, phrase_list = Lemmatizer.process_data(sentences, spans, num_workers=n_workers)
 
 
@@ -248,10 +248,6 @@ class UCTopicTool(object):
             # if len(sentences) < 1000:
             #     logger.warning("We do not recommend finetuning on a small dataset.")
 
-            from utils import get_rankings
-            from dataloader import get_train_loader
-            from trainer import ClusterLearner
-
             rankings = get_rankings(probs, positive_ratio=positive_ratio)
 
             pseudo_label_dict = defaultdict(list)
@@ -288,7 +284,7 @@ class UCTopicTool(object):
             ret = False
 
             while True:
-                tqdm_dataloader = tqdm(train_loader, ncols=100)
+                tqdm_dataloader = tqdm(train_loader, total=finetune_step)
                 for features in tqdm_dataloader:
 
                     for feature in features:
@@ -328,7 +324,7 @@ class UCTopicTool(object):
                                         keepdim=True,
                                         batch_size=batch_size)
                 logger.info("Clustering.")
-                s_score, p_score, centers = get_silhouette_score(phrase_embeddings, n_clusters=num_class, max_iter=max_iter)
+                p_score, centers = get_kmeans(phrase_embeddings, n_clusters=num_class, max_iter=max_iter)
 
                 all_probs = p_score.numpy()
                 logger.info("Done.")

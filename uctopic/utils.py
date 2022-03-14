@@ -4,7 +4,12 @@ from numpy import ndarray
 from tqdm import tqdm
 from multiprocessing import Pool
 
-NLP = spacy.load('en_core_web_sm', disable=['ner', 'token2vec'])
+try:
+    NLP = spacy.load('en_core_web_sm', disable=['ner', 'token2vec'])
+except:
+    import os
+    os.system("python -m spacy download en_core_web_sm")
+    NLP = spacy.load('en_core_web_sm', disable=['ner', 'token2vec'])
 
 class NounPhraser:
     @staticmethod

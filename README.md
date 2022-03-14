@@ -1,14 +1,10 @@
-## UCTopic: Unsupervised Contrastive Learning for Phrase Representations and Topic Mining
+# UCTopic
 
-This repository contains the code and pre-trained models for our paper [UCTopic: Unsupervised Contrastive Learning for Phrase Representations and Topic Mining](https://arxiv.org/abs/2202.13469).
+This repository contains the code of model UCTopic and an easy-to-use tool UCTopicTool used for <strong>Topic Mining</strong> or <strong>Unsupervised Aspect Extractioin</strong>.
 
-## To-Do:
-We continue completing the following sections:
+Our ACL 2022 paper [UCTopic: Unsupervised Contrastive Learning for Phrase Representations and Topic Mining](https://arxiv.org/abs/2202.13469).
 
- * Get Topical Phrases
-
-
-## Quick Links
+# Quick Links
 
   - [Overview](#overview)
   - [Pretrained Model](#pretrained-model)
@@ -23,11 +19,11 @@ We continue completing the following sections:
   - [Contact](#contact)
   - [Citation](#citation)
 
-## Overview
+# Overview
 
 We propose UCTopic, a novel unsupervised contrastive learning framework for context-aware phrase representations and topic mining. UCTopic is pretrained in a large scale to distinguish if the contexts of two phrase mentions have the same semantics. The key to pretraining is positive pair construction from our phrase-oriented assumptions. However, we find traditional in-batch negatives cause performance decay when finetuning on a dataset with small topic numbers. Hence, we propose cluster-assisted contrastive learning(CCL) which largely reduces noisy negatives by selecting negatives from clusters and further improves phrase representations for topics accordingly.
 
-## Pretrained Model
+# Pretrained Model
 Our released model:
 |              Model              | Note|
 |:-------------------------------|------|
@@ -35,7 +31,7 @@ Our released model:
 
 Unzip to get `uctopic-base` folder.
 
-## Getting Started
+# Getting Started
 We provide an easy-to-use phrase representation tool based on our UCTopic model. To use the tool, first install the uctopic package from PyPI
 ```bash
 pip install uctopic
@@ -44,6 +40,8 @@ Or directly install it from our code
 ```bash
 python setup.py install
 ```
+
+## UCTopic
 After installing the package, you can load our model by just two lines of code
 ```python
 from uctopic import UCTopic
@@ -51,8 +49,7 @@ model = UCTopic.from_pretrained('JiachengLi/uctopic-base')
 ```
 The model will automatically download pre-trained parameters from [HuggingFace's models](https://huggingface.co/models). If you encounter any problem when directly loading the models by HuggingFace's API, you can also download the models manually from the above table and use `model = UCTopic.from_pretrained({PATH TO THE DOWNLOAD MODEL})`.
 
-### Get Phrase Embeddings
-Basically, our model inputs are same as [LUKE](https://huggingface.co/docs/transformers/model_doc/luke). Note: please input only <strong>ONE</strong> span each time, otherwise, will have performance decay according to our empirical results.
+To get pre-trained <strong>phrase representations</strong>, our model inputs are same as [LUKE](https://huggingface.co/docs/transformers/model_doc/luke). Note: please input only <strong>ONE</strong> span each time, otherwise, will have performance decay according to our empirical results.
 
 ```python
 from uctopic import UCTopicTokenizer, UCTopic
@@ -68,10 +65,93 @@ outputs, phrase_repr = model(**inputs)
 ```
 `phrase_repr` is the phrase embedding (size `[768]`) of the phrase `Los Angeles`. `outputs` has the same format as the outputs from `LUKE`.
 
-## Experiments
+## UCTopicTool
+We provide a tool `UCTopicTool` built on `UCTopic` for efficient phrase encoding and topic mining (or unsupervised aspect extraction).
+
+### Initialization
+
+`UCTopicTool` is initialized by giving the `model_name_or_path` and `device`.
+```python
+from uctopic import UCTopicTool
+
+topic_tool = UCTopicTool('JiachengLi/uctopic-base', device='cuda:0')
+```
+
+### Phrase Encoding
+
+Phrases are encoded by our method `UCTopicTool.encode` in batches, which is more efficient than `UCTopic`.
+```python
+phrases = [["This place is so much bigger than others!", (0, 10)],
+           ["It was totally packed and loud.", (15, 21)],
+           ["Service was on the slower side.", (0, 7)],
+           ["I ordered 2 mojitos: 1 lime and 1 mango.", (12, 19)],
+           ["The ingredient weren't really fresh.", (4, 14)]]
+
+embeddings = topic_tool.encode(phrases) # len(embeddings) is equal to len(phrases)
+```
+**Note**: Each instance in `phrases` contains only one sentence and one span (character-level position) in format `[sentence, span]`.
+
+Arguments for `UCTopicTool.encode` are as follows,
+* **phrase** (List) - A list of `[sentence, span]` to be encoded.
+* **return_numpy** (bool, *optional*, defaults to `False`) - Return `numpy.array` or `torch.Tensor`.
+* **normalize_to_unit** (bool, *optional*, defaults to `True`) - Normalize all embeddings to unit vectors.
+* **keepdim** (bool, *optional*, defaults to `True`) - Keep dimension size `[instance_number, hidden_size]`.
+* **batch_size** (int, *optional*, defaults to `32`) - The size of mini-batch in the model.
+
+### Topic Mining and Unsupervised Aspect Extraction
+
+The method `UCTopicTool.topic_mining` can mine topical phrases or conduct aspect extraction from sentences with or without spans.
+
+```python
+sentences = ["This place is so much bigger than others!",
+             "It was totally packed and loud.",
+             "Service was on the slower side.",
+             "I ordered 2 mojitos: 1 lime and 1 mango.",
+             "The ingredient weren't really fresh."]
+
+spans = [[(0, 10)],                       # This place
+         [(15, 21), (26, 30)],            # packed; loud
+         [(0, 7)],                        # Service
+         [(12, 19), (21, 27), (32, 39)],  # mojitos; 1 lime; 1 mango
+         [(4, 14)]]                       # ingredient
+# len(sentences) is equal to len(spans)
+output_data, topic_phrase_dict = tool.topic_mining(sentences, spans, \
+                                                   n_clusters=[15, 25])
+```
+**Note**: If `spans` is not given, `UCTopicTool` will extract noun phrases by [spaCy](https://spacy.io/).
+
+Arguments for `UCTopicTool.topic_mining` are as follows,
+
+Data arguments:
+* **sentences** (List) - A List of sentences for topic mining.
+* **spans** (List, *optional*, defaults to `None`) - A list of span list corresponding sentences, e.g., `[[(0, 9), (5, 7)], [(1, 2)]]` and `len(sentences)==len(spans)`. If None, automatically mine phrases from noun chunks.
+
+Clustering arguments:
+* **n_clusters** (int or List, *optional*, defaults to `2`) - The number of topics. When `n_clusters` is a list, `n_clusters[0]` and `n_clusters[-1]` will be the minimum and maximum numbers to search.
+* **meric** (str, *optional*, defaults to `"cosine"`) - The metric to measure the distance between vectors. `"cosine"` or `"euclidean"`.
+* **batch_size** (int, *optional*, defaults to `64`) - The size of mini-batch for phrase encoding.
+* **max_iter** (int, *optional*, defaults to `300`) - The maximum iteration number of kmeans.
+        
+CCL-finetune arguments:
+* **ccl_finetune** (bool, *optional*, defaults to `True`) - Whether to conduct CCL-finetuning in the paper.
+* **batch_size_finetune** (int, *optional*, defaults to `8`) - The size of mini-batch for finetuning.
+* **max_finetune_num** (int, *optional*, defaults to `100000`) - The maximum number of training instances for finetuning.
+* **finetune_step** (int, *optional*, defaults to `2000`) - The number of training steps for finetuning.
+* **contrastive_num** (int, *optional*, defaults to `5`) - The number of negatives in contrastive learning.
+* **positive_ratio** (float, *optional*, defaults to `0.1`) - The ratio of the most confident instances for finetuning.
+* **n_sampling** (int, *optional*, defaults to `10000`) - The number of sampled examples for cluster number confirmation and finetuning. Set to `-1` to use the whole dataset.
+* **n_workers** (int, *optional*, defaults to `8`) - The number of workers for preprocessing data.
+
+Returns for `UCTopicTool.topic_mining` are as follows,
+* **output_data** (List) - A list of sentences and corresponding phrases and topic numbers. Each element is `[sentence, [[start1, end1, topic1], [start2, end2, topic2]]]`.
+* **topic_phrase_dict** (Dict) - A dictionary of topics and the list of phrases under a topic. The phrases are sorted by their confidence scores. E.g., `{topic: [[phrase1, score1], [phrase2, score2]]}`.
+
+
+
+# Experiments
 In this section, we re-implement experiments in our paper.
 
-### Requirements
+## Requirements
 First, install PyTorch by following the instructions from [the official website](https://pytorch.org). To faithfully reproduce our results, please use the correct `1.9.0` version corresponding to your platforms/CUDA versions.
 
 Then run the following script to install the remaining dependencies,
@@ -84,10 +164,10 @@ Download `en_core_web_sm` model from spacy,
 python -m spacy download en_core_web_sm
 ```
 
-### Datasets
+## Datasets
 The downstream datasets used in our experiments can be downloaded from [here](https://drive.google.com/file/d/1dVIp9li1Wdh0JgU8slsWm0ObcitbQtSL/view?usp=sharing).
 
-### Entity Clustering
+## Entity Clustering
 The config file of entity clustering is `clustering/consts.py` and most arguments are self-explained. Please setup `--gpu` and `--data_path` before running. The clustering scores will be printed.
 
 Clustering with our pre-trained phrase embeddings.
@@ -99,7 +179,7 @@ Clustering with our pre-trained phrase embeddings and Cluster-Assisted Constrast
 python clustering_ccl_finetune.py --gpu 0
 ```
 
-### Topic Mining
+## Topic Mining
 The config file of entity clustering is `topic_modeling/consts.py`.
 
 **Key Argument Table**
@@ -146,11 +226,11 @@ Arguments description can be found in `pretrain.py`. All the other arguments are
 
 Our pretrained checkpoints are slightly different from the checkpoint `uctopic-base`. Please refer `convert_uctopic_parameters.py` to convert it.
 
-## Contact
+# Contact
 
 If you have any questions related to the code or the paper, feel free to email Jiacheng (`j9li@eng.ucsd.edu`). If you encounter any problems when using the code, or want to report a bug, you can open an issue. Please try to specify the problem with details so we can help you better and quicker!
 
-## Citation
+# Citation
 
 Please cite our paper if you use UCTopic in your work:
 
