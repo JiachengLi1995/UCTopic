@@ -334,8 +334,6 @@ class UCTopicCluster(LukePreTrainedModel):
         
         if cluster_centers is not None:
 
-            self.head = MLPLayer(self.config)
-
             initial_cluster_centers = torch.tensor(
                 cluster_centers, dtype=torch.float, requires_grad=True)
             self.cluster_centers = Parameter(initial_cluster_centers)
@@ -387,7 +385,7 @@ class UCTopicCluster(LukePreTrainedModel):
         
         return loss
 
-    def get_cluster_prob(self, embeddings, metric='l2'):
+    def get_cluster_prob(self, embeddings):
         cos = self.sim(embeddings.unsqueeze(1), self.cluster_centers.unsqueeze(0))
         return self.softmax(cos)
 

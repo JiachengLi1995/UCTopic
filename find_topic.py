@@ -113,7 +113,7 @@ def main():
 
     for i in range(len(rankings)):
         for j in range(len(rankings[i])):
-            pseudo_label_dict[phrase_list[rankings[i][j]][-1]].append(j)
+            pseudo_label_dict[phrase_list_sampled[rankings[i][j]][-1]].append(j)
         
 
     ## majority vote
