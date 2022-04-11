@@ -1,6 +1,6 @@
 # UCTopic
 
-This repository contains the code of model UCTopic and an easy-to-use tool UCTopicTool used for <strong>Topic Mining</strong> or <strong>Unsupervised Aspect Extractioin</strong>.
+This repository contains the code of model UCTopic and an easy-to-use tool UCTopicTool used for <strong>Topic Mining</strong>, <strong>Unsupervised Aspect Extractioin</strong> or <strong>Phrase Retrieval</strong>.
 
 Our ACL 2022 paper [UCTopic: Unsupervised Contrastive Learning for Phrase Representations and Topic Mining](https://arxiv.org/abs/2202.13469).
 
@@ -67,7 +67,7 @@ outputs, phrase_repr = model(**inputs)
 `phrase_repr` is the phrase embedding (size `[768]`) of the phrase `Los Angeles`. `outputs` has the same format as the outputs from `LUKE`.
 
 ## UCTopicTool
-We provide a tool `UCTopicTool` built on `UCTopic` for efficient phrase encoding and topic mining (or unsupervised aspect extraction).
+We provide a tool `UCTopicTool` built on `UCTopic` for efficient phrase encoding, topic mining (or unsupervised aspect extraction) or phrase retrieval.
 
 ### Initialization
 
@@ -97,7 +97,7 @@ Arguments for `UCTopicTool.encode` are as follows,
 * **return_numpy** (bool, *optional*, defaults to `False`) - Return `numpy.array` or `torch.Tensor`.
 * **normalize_to_unit** (bool, *optional*, defaults to `True`) - Normalize all embeddings to unit vectors.
 * **keepdim** (bool, *optional*, defaults to `True`) - Keep dimension size `[instance_number, hidden_size]`.
-* **batch_size** (int, *optional*, defaults to `32`) - The size of mini-batch in the model.
+* **batch_size** (int, *optional*, defaults to `64`) - The size of mini-batch in the model.
 
 ### Topic Mining and Unsupervised Aspect Extraction
 
@@ -118,6 +118,12 @@ spans = [[(0, 10)],                       # This place
 # len(sentences) is equal to len(spans)
 output_data, topic_phrase_dict = tool.topic_mining(sentences, spans, \
                                                    n_clusters=[15, 25])
+
+# predict topic for new phrases
+phrases = [["The food here is amazing!", (4, 8)],
+           ["Lovely ambiance with live music!", (21, 31)]]
+
+topics = tool.predict_topic(phrases)
 ```
 **Note**: If `spans` is not given, `UCTopicTool` will extract noun phrases by [spaCy](https://spacy.io/).
 
@@ -128,7 +134,7 @@ Data arguments:
 * **spans** (List, *optional*, defaults to `None`) - A list of span list corresponding sentences, e.g., `[[(0, 9), (5, 7)], [(1, 2)]]` and `len(sentences)==len(spans)`. If None, automatically mine phrases from noun chunks.
 
 Clustering arguments:
-* **n_clusters** (int or List, *optional*, defaults to `2`) - The number of topics. When `n_clusters` is a list, `n_clusters[0]` and `n_clusters[-1]` will be the minimum and maximum numbers to search.
+* **n_clusters** (int or List, *optional*, defaults to `2`) - The number of topics. When `n_clusters` is a list, `n_clusters[0]` and `n_clusters[1]` will be the minimum and maximum numbers to search, `n_clusters[2]` is the search step length (if not provided, default to 1).
 * **meric** (str, *optional*, defaults to `"cosine"`) - The metric to measure the distance between vectors. `"cosine"` or `"euclidean"`.
 * **batch_size** (int, *optional*, defaults to `64`) - The size of mini-batch for phrase encoding.
 * **max_iter** (int, *optional*, defaults to `300`) - The maximum iteration number of kmeans.
@@ -148,6 +154,76 @@ Returns for `UCTopicTool.topic_mining` are as follows,
 * **topic_phrase_dict** (Dict) - A dictionary of topics and the list of phrases under a topic. The phrases are sorted by their confidence scores. E.g., `{topic: [[phrase1, score1], [phrase2, score2]]}`.
 
 
+The method `UCTopicTool.predict_topic` predicts the topic ids for new phrases based on your training results from `UCTopicTool.topic_mining`. The inputs of `UCTopicTool.predict_topic` are same as `UCTopicTool.encode` and returns a list of topic ids (int).
+
+
+### Phrase Similarities and Retrieval
+
+The method `UCTopicTool.similarity` compute the cosine similarities between two groups of phrases:
+
+```python
+phrases_a = [["This place is so much bigger than others!", (0, 10)],
+           ["It was totally packed and loud.", (15, 21)]]
+
+phrases_b = [["Service was on the slower side.", (0, 7)],
+           ["I ordered 2 mojitos: 1 lime and 1 mango.", (12, 19)],
+           ["The ingredient weren't really fresh.", (4, 14)]]
+
+similarities = tool.similarity(phrases_a, phrases_b)
+```
+Arguments for `UCTopicTool.similarity` are as follows,
+* **queries** (List) - A list of `[sentence, span]` as queries.
+* **keys** (List or `numpy.array`) - A list of `[sentence, span]` as keys or phrase representations (`numpy.array`) from `UCTopicTool.encode`.
+* **batch_size** (int, *optional*, defaults to `64`) - The size of mini-batch in the model.
+
+`UCTopicTool.similarity` returns a `numpy.array` contains the similarities between phrase pairs in two groups.
+
+
+The methods `UCTopicTool.build_index` and `UCTopicTool.search` are used for phrase retrieval:
+```python
+phrases = [["This place is so much bigger than others!", (0, 10)],
+           ["It was totally packed and loud.", (15, 21)],
+           ["Service was on the slower side.", (0, 7)],
+           ["I ordered 2 mojitos: 1 lime and 1 mango.", (12, 19)],
+           ["The ingredient weren't really fresh.", (4, 14)]]
+
+# query multiple phrases
+query1 = [["The food here is amazing!", (4, 8)],
+           ["Lovely ambiance with live music!", (21, 31)]]  
+
+# query single phrases
+query2 = ["The food here is amazing!", (4, 8)]
+
+tool.build_index(phrases)
+results = tool.search(query1, top_k=3)
+# or
+results = tool.search(query2, top_k=3)
+```
+We also support [faiss](https://github.com/facebookresearch/faiss), an efficient similarity search library. Just install the package following [instructions](https://github.com/facebookresearch/faiss/blob/main/INSTALL.md) here and `UCTopicTool` will automatically use `faiss` for efficient search.
+
+`UCTopicTool.search` returns the ranked top k phrases for each query.
+
+
+### Save and Load finetuned UCTopicTool
+
+The methods `UCTopicTool.save` and `UCTopicTool.load` are used for save and load all paramters of `UCTopicTool`.
+
+Save:
+```python
+tool = UCTopicTool('JiachengLi/uctopic-base', 'cuda:0')
+# finetune UCTopic with CCL
+output_data, topic_phrase_dict = tool.topic_mining(sentences, spans, \
+                                                   n_clusters=[15, 25])
+
+tool.save(**your directory**)
+```
+
+Load:
+```python
+tool = UCTopicTool('JiachengLi/uctopic-base', 'cuda:0')
+tool.load(**your directory**)
+```
+The loaded parameters will be used for all methods (for encoding, topic mining, phrase similarities and retrieval) introduced above.
 
 # Experiments
 In this section, we re-implement experiments in our paper.

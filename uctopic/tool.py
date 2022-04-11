@@ -1,5 +1,6 @@
 import logging
 import random
+import os
 from tqdm import tqdm
 import torch
 from torch import Tensor
@@ -8,6 +9,7 @@ from numpy import ndarray
 from collections import defaultdict, Counter
 from .models import UCTopicCluster
 from .tokenizer import UCTopicTokenizer
+from sklearn.metrics.pairwise import cosine_similarity
 from typing import List, Dict, Tuple, Type, Union
 
 logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s', datefmt='%m/%d/%Y %H:%M:%S',
@@ -15,7 +17,10 @@ logging.basicConfig(format='%(asctime)s - %(levelname)s - %(name)s - %(message)s
 logger = logging.getLogger(__name__)
 
 class UCTopicTool(object):
-    def __init__(self, model_name_or_path: str, device: str = None):
+    def __init__(self, model_name_or_path: str, 
+                       device: str = None,
+                       num_cells: int = 100,
+                       num_cells_in_search: int = 10):
         
         self.tokenizer = UCTopicTokenizer.from_pretrained(model_name_or_path)
         self.model = UCTopicCluster.from_pretrained(model_name_or_path)
@@ -23,13 +28,26 @@ class UCTopicTool(object):
 
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
+            self.device_type = device
+            self.device_num = 0
+        else:
+            self.device_type = device.split(':')[0]
+            self.device_num = int(device.split(':')[1])
         self.device = torch.device(device)
+
+        self.num_cells = num_cells
+        self.num_cells_in_search = num_cells_in_search
+
+        self.do_topic_mining = False
+        self.centers = None
+        self.merge_phrase_dict = None
+
 
     def encode(self, phrase: List,
                 return_numpy: bool = False,
                 normalize_to_unit: bool = True,
                 keepdim: bool = True,
-                batch_size: int = 32) -> Union[ndarray, Tensor]:
+                batch_size: int = 64) -> Union[ndarray, Tensor]:
 
         '''
         phrase: [sentence, span] or [[sentence, span], [sentence, span]].
@@ -51,7 +69,8 @@ class UCTopicTool(object):
 
         with torch.no_grad():
             total_batch = len(phrase) // batch_size + (1 if len(phrase) % batch_size > 0 else 0)
-            for batch_id in tqdm(range(total_batch)):
+            iterator = range(total_batch) if total_batch==1 else tqdm(range(total_batch))
+            for batch_id in iterator:
 
                 batch = phrase[batch_id*batch_size:(batch_id+1)*batch_size]
 
@@ -131,7 +150,7 @@ class UCTopicTool(object):
             is_valid_span = True
             if spans is not None:
                 for span in spans[idx]:
-                    if span[0] > len(sentence) or span[1] > len(sentence):
+                    if span[0] >= len(sentence) or span[1] > len(sentence):
                         is_valid_span = False
 
             if len(tokens) <= 510 and is_valid_span:
@@ -170,7 +189,7 @@ class UCTopicTool(object):
         spans: A list of spans corresponding sentences, len(spans)=len(sentences) e.g., [[(0, 9), (5, 7)], [(1, 2)]]. If None, automatically mine phrases from noun chunks.
 
         Clustering arguments:
-        n_clusters: The number of topics. int or List. When n_clusters is a list, n_clusters[0] and n_clusters[1] will be the minimum and maximum numbers to search.
+        n_clusters: The number of topics. int or List. When n_clusters is a list, n_clusters[0] and n_clusters[1] will be the minimum and maximum numbers to search, n_clusters[2] is the step length.
         meric: The metric to measure the distance between vectors. "cosine" or "euclidean". Default to "cosine".
         batch_size: The size of minibatch for phrase encoding.
         max_iter: Maximum iteration number of kmeans.
@@ -221,11 +240,13 @@ class UCTopicTool(object):
                                         batch_size=batch_size)
 
         if isinstance(n_clusters, int):
-            n_clusters = [n_clusters]
+            n_clusters = [n_clusters, n_clusters, 1]
+        
+        if len(n_clusters) == 2: n_clusters.append(1)
 
         s_scores, prob_scores, center_list = [], [], []
         class_list = []
-        for num_class in range(n_clusters[0], n_clusters[-1]+1):
+        for num_class in range(n_clusters[0], n_clusters[1]+1, n_clusters[2]):
 
             s_score, p_score, centers = get_silhouette_score(phrase_embeddings, n_clusters=num_class, max_iter=max_iter)
             class_list.append(num_class)
@@ -312,6 +333,8 @@ class UCTopicTool(object):
 
             all_probs = all_probs.numpy()
 
+            self.centers = self.model.cluster_centers.detach().cpu().numpy()
+
         else:
 
             if n_sampling > 0:
@@ -327,11 +350,14 @@ class UCTopicTool(object):
                 p_score, centers = get_kmeans(phrase_embeddings, n_clusters=num_class, max_iter=max_iter)
 
                 all_probs = p_score.numpy()
+                self.centers = centers
+
                 logger.info("Done.")
 
             else:
 
                 all_probs = probs.numpy()
+                self.centers = centers
 
         
         assert len(phrase_list) == len(all_probs)
@@ -366,7 +392,199 @@ class UCTopicTool(object):
             if doc_id in doc_id_phrase_pred:
                 output_data.append([sentence, doc_id_phrase_pred[doc_id]])
 
+        self.merge_phrase_dict = merge_phrase_dict
+        self.do_topic_mining = True
+
         return output_data, topic_phrase_dict
+
+    def save(self, path: str):
+        '''
+        Save model parameters and clustering centers.
+        path: the directory of the saved files.
+        '''
+        if not self.do_topic_mining:
+            assert 0, 'Please run topic_mining before save the model.'
+
+        if not os.path.isdir(path):
+            assert 0, f'{path} is not an existing directory.'
+
+        save_dict = {'uctopic': self.model.state_dict(),
+                    'cluster_centers': self.centers,
+                    'phrase_dict': self.merge_phrase_dict
+                    }
+
+        torch.save(save_dict, os.path.join(path, 'uctopic_model.bin'))
+
+    def load(self, path: str):
+        '''
+        Load model parameters and centers from topic modeling from checkpoint.
+        path: the directory of the saved files.
+        '''
+
+        if not os.path.isdir(path):
+            assert 0, f'{path} is not an existing directory.'
+
+        save_dict = torch.load(os.path.join(path, 'uctopic_model.bin'))
+
+        self.centers = save_dict['cluster_centers']
+        if 'cluster_centers' in save_dict['uctopic']:
+            del save_dict['uctopic']['cluster_centers']
+        self.model.load_state_dict(save_dict['uctopic'])
+        self.model.update_cluster_centers(self.centers)
+
+        self.merge_phrase_dict = save_dict['phrase_dict']
+
+        self.do_topic_mining = True
+
+        logger.info('Load checkpoint successfully.')
+
+    
+    def similarity(self, queries: List, keys: Union[List, ndarray], batch_size: int = 64) -> Union[float, ndarray]:
+        
+        query_vecs = self.encode(queries, return_numpy=True, batch_size=batch_size) # suppose N queries
+        
+        if not isinstance(keys, ndarray):
+            key_vecs = self.encode(keys, return_numpy=True, batch_size=batch_size) # suppose M keys
+        else:
+            key_vecs = keys
+
+        # check whether N == 1 or M == 1
+        single_query, single_key = query_vecs.shape[0] == 1, key_vecs.shape[0] == 1 
+        if single_query:
+            query_vecs = query_vecs.reshape(1, -1)
+        if single_key:
+            key_vecs = key_vecs.reshape(1, -1)
+        
+        # returns an N*M similarity array
+        similarities = cosine_similarity(query_vecs, key_vecs)
+        
+        if single_query:
+            similarities = similarities[0]
+            if single_key:
+                similarities = float(similarities[0])
+        
+        return similarities
+
+    
+    def build_index(self, phrases: List, 
+                        use_faiss: bool = None,
+                        faiss_fast: bool = False,
+                        batch_size: int = 64):
+
+        if use_faiss is None or use_faiss:
+            try:
+                import faiss
+                assert hasattr(faiss, "IndexFlatIP")
+                use_faiss = True 
+            except:
+                logger.warning("Fail to import faiss. If you want to use faiss, install faiss through PyPI. Now the program continues with brute force search.")
+                use_faiss = False
+        
+        logger.info("Encoding embeddings for sentences...")
+        embeddings = self.encode(phrases, batch_size=batch_size, normalize_to_unit=True, return_numpy=True)
+
+        logger.info("Building index...")
+        self.index = {"phrases": phrases}
+        
+        if use_faiss:
+            quantizer = faiss.IndexFlatIP(embeddings.shape[1])  
+            if faiss_fast:
+                index = faiss.IndexIVFFlat(quantizer, embeddings.shape[1], min(self.num_cells, len(phrases))) 
+            else:
+                index = quantizer
+
+            if self.device_type == "cuda":
+                if hasattr(faiss, "StandardGpuResources"):
+                    logger.info("Use GPU-version faiss")
+                    res = faiss.StandardGpuResources()
+                    res.setTempMemory(20 * 1024 * 1024 * 1024)
+                    index = faiss.index_cpu_to_gpu(res, self.device_num, index)
+                else:
+                    logger.info("Use CPU-version faiss")
+            else: 
+                logger.info("Use CPU-version faiss")
+
+            if faiss_fast:            
+                index.train(embeddings.astype(np.float32))
+            index.add(embeddings.astype(np.float32))
+            index.nprobe = min(self.num_cells_in_search, len(phrases))
+            self.is_faiss_index = True
+        else:
+            index = embeddings
+            self.is_faiss_index = False
+        self.index["index"] = index
+        logger.info("Finished")
+
+
+    def search(self, queries: List, top_k: int = 5):
+        
+        if not self.is_faiss_index:
+            
+            combined_results = []
+            similarities = self.similarity(queries, self.index["index"]).tolist()
+
+            single_query = False
+            if isinstance(queries[0], str):
+                similarities = [similarities]
+                single_query = True
+
+            for line in similarities:
+                id_and_score = []
+                for i, s in enumerate(line):
+                    id_and_score.append((i, s))
+                id_and_score = sorted(id_and_score, key=lambda x: x[1], reverse=True)[:top_k]
+                results = [[self.index["phrases"][idx], score] for idx, score in id_and_score]
+                combined_results.append(results)
+            
+            if single_query:
+                return combined_results[0]
+            else:
+                return combined_results
+        else:
+            query_vecs = self.encode(queries,normalize_to_unit=True, keepdim=True, return_numpy=True)
+
+            distance, idx = self.index["index"].search(query_vecs.astype(np.float32), top_k)
+            
+            def pack_single_result(dist, idx):
+                results = [[self.index["phrases"][i], s] for i, s in zip(idx, dist)]
+                return results
+            
+            if isinstance(queries[0], list):
+                combined_results = []
+                for i in range(len(queries)):
+                    results = pack_single_result(distance[i], idx[i])
+                    combined_results.append(results)
+                return combined_results
+            else:
+                return pack_single_result(distance[0], idx[0])
+
+    
+    def predict_topic(self, phrases: List) -> List:
+
+        if not self.do_topic_mining:
+            assert 0, 'Please run topic_mining before predict the topic.'
+
+        from .utils import Lemmatizer
+
+        if isinstance(phrases[0], str):
+            phrases = [phrases]
+
+        topics = []
+
+        for line in phrases:
+
+            text, span = line
+            span_lemma = Lemmatizer.normalize(text[span[0]:span[1]])
+
+            if span_lemma in self.merge_phrase_dict:
+                topics.append(int(self.merge_phrase_dict[span_lemma]))
+            else:
+                similarities = self.similarity(line, self.centers)
+                pred = similarities.argmax(axis=-1)
+                topics.append(pred)
+
+        return topics
+
 
 # if __name__=="__main__":
 
