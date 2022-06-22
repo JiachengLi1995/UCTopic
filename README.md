@@ -312,11 +312,10 @@ If you have any questions related to the code or the paper, feel free to email J
 Please cite our paper if you use UCTopic in your work:
 
 ```bibtex
-@article{Li2022UCTopicUC,
+@inproceedings{Li2022UCTopicUC,
   title={UCTopic: Unsupervised Contrastive Learning for Phrase Representations and Topic Mining},
   author={Jiacheng Li and Jingbo Shang and Julian McAuley},
-  journal={ArXiv},
-  year={2022},
-  volume={abs/2202.13469}
+  booktitle={ACL},
+  year={2022}
 }
 ```
