@@ -313,9 +313,17 @@ Please cite our paper if you use UCTopic in your work:
 
 ```bibtex
 @inproceedings{Li2022UCTopicUC,
-  title={UCTopic: Unsupervised Contrastive Learning for Phrase Representations and Topic Mining},
-  author={Jiacheng Li and Jingbo Shang and Julian McAuley},
-  booktitle={ACL},
-  year={2022}
+    title = "{UCT}opic: Unsupervised Contrastive Learning for Phrase Representations and Topic Mining",
+    author = "Li, Jiacheng  and
+      Shang, Jingbo  and
+      McAuley, Julian",
+    booktitle = "Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers)",
+    month = may,
+    year = "2022",
+    address = "Dublin, Ireland",
+    publisher = "Association for Computational Linguistics",
+    url = "https://aclanthology.org/2022.acl-long.426",
+    doi = "10.18653/v1/2022.acl-long.426",
+    pages = "6159--6169"
 }
 ```
