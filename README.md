@@ -43,6 +43,14 @@ python setup.py install
 ```
 
 ## UCTopic Model
+
+<strong>Note</strong>: Please make sure your transformers version is 4.7.0 to load our pre-trained checkpoints.
+
+You can install correct transformers version by:
+```bash
+pip install transformers==4.7.0
+```
+
 After installing the package, you can load our model by just two lines of code
 ```python
 from uctopic import UCTopic
